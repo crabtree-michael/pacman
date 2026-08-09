@@ -1,0 +1,22 @@
+{
+  "name": "pacman",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pac-Man for mobile web",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/crabtree-michael/pacman.git"
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1"
+  }
+}
