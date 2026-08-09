@@ -11,12 +11,16 @@ import { expect, test, type Page } from '@playwright/test';
  * of this file.
  */
 
-/** Pixels of the entity layer, as a stable string. Empty until the first draw. */
-async function entityFrame(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const canvas = document.querySelector<HTMLCanvasElement>('#layer-entities');
+/** Pixels of one canvas layer, as a stable string. Empty until the first draw. */
+async function layerFrame(page: Page, selector: string): Promise<string> {
+  return page.evaluate((id) => {
+    const canvas = document.querySelector<HTMLCanvasElement>(id);
     return canvas ? canvas.toDataURL() : '';
-  });
+  }, selector);
+}
+
+async function entityFrame(page: Page): Promise<string> {
+  return layerFrame(page, '#layer-entities');
 }
 
 /**
@@ -101,12 +105,23 @@ test.describe('skeleton smoke', () => {
     expect(await entityFrame(page)).toBe(ready);
 
     // Past the countdown Pac-Man walks off on his own, so the layer must change.
-    await page.waitForTimeout(READY_MS);
-    const playing = await entityFrame(page);
-    expect(playing).not.toBe(ready);
+    //
+    // Sampled continuously across the end of the countdown rather than at two
+    // chosen moments: with no pellets to eat and no ghosts to dodge, he reaches
+    // the wall at the end of his corridor and stops for good less than a second
+    // into play. Any pair of samples taken after that compares two identical
+    // parked frames, whatever the wait before them was.
+    // TODO(mechanics): once he has somewhere to be, this can go back to a sleep
+    // and a single comparison.
+    const frames = new Set<string>();
+    const deadline = Date.now() + READY_MS + 1000;
+    while (Date.now() < deadline) {
+      frames.add(await entityFrame(page));
+      await page.waitForTimeout(80);
+    }
 
-    await page.waitForTimeout(300);
-    expect(await entityFrame(page)).not.toBe(playing);
+    frames.delete(ready);
+    expect(frames.size, 'distinct frames drawn once play began').toBeGreaterThanOrEqual(3);
   });
 
   test('floats the joystick to the thumb and follows a drag', async ({ page }) => {
@@ -172,6 +187,58 @@ test.describe('skeleton smoke', () => {
 
     // TODO(mechanics): once pellet collection lands, tighten this to the
     // architecture's original wording — assert the score changes.
+  });
+
+  /**
+   * The phase machine, seen from outside: the only proof that the pause path
+   * runs end to end — button, phase, overlay, and a loop that keeps painting a
+   * game that is no longer advancing.
+   */
+  test('pauses on the HUD button and resumes on a tap', async ({ page }) => {
+    await page.goto('/');
+    await settledFrame(page);
+
+    // Anchored on the READY! card clearing, which happens exactly when play
+    // begins — and, unlike the entity layer, changes once and then holds. The
+    // pause has to land while Pac-Man is still walking to prove anything, and
+    // he only walks for the second or so it takes him to reach the wall.
+    const readyOverlay = await layerFrame(page, '#layer-overlay');
+    await expect
+      .poll(() => layerFrame(page, '#layer-overlay'), {
+        message: 'the READY! card should have cleared',
+        timeout: READY_MS * 2,
+        intervals: [100],
+      })
+      .not.toBe(readyOverlay);
+
+    // Nothing is on the overlay during play; the pause card is a real change.
+    const playingOverlay = await layerFrame(page, '#layer-overlay');
+
+    await page.locator('[data-action="pause"]').click();
+    await expect
+      .poll(() => layerFrame(page, '#layer-overlay'), {
+        message: 'the pause card should have been drawn',
+        intervals: [100],
+      })
+      .not.toBe(playingOverlay);
+
+    // A paused game does not tick, so the entity layer stops dead — while the
+    // loop itself keeps running, which is what draws the card. The wait is
+    // wall-clock time the simulation never sees, so Pac-Man has just as much
+    // walking left when it ends.
+    const frozen = await entityFrame(page);
+    await page.waitForTimeout(400);
+    expect(await entityFrame(page)).toBe(frozen);
+
+    // Tapping the board resumes it (product spec §2.3).
+    await page.locator('#board').click();
+    await expect
+      .poll(entityFrame.bind(null, page), {
+        message: 'the game should be moving again',
+        intervals: [100],
+      })
+      .not.toBe(frozen);
+    expect(await layerFrame(page, '#layer-overlay')).toBe(playingOverlay);
   });
 
   test('loads without console errors', async ({ page }) => {

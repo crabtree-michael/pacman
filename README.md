@@ -4,9 +4,9 @@ A mobile-first, touch-controlled Pac-Man for the browser. No install, no
 account, no backend.
 
 This repository currently holds the **skeleton**: build tooling, the fixed-step
-simulation, the layered renderer, the input pipeline and the responsive layout,
-wired together and running, with the test harness around them. Gameplay is not
-— see [Status](#status).
+simulation, the game-flow state machine, the layered renderer, the input
+pipeline and the responsive layout, wired together and running, with the test
+harness around them. Gameplay is not — see [Status](#status).
 
 ## Design documents
 
@@ -75,15 +75,17 @@ yet; the PWA ticket will need a tunnel or a local certificate.
 
 ```
 src/
-  main.ts                   Bootstrap: mount layers, wire input, start the loop
+  main.ts                   Bootstrap: mount layers, wire input, open the gate
   app/
+    game.ts                 Loop <-> simulation seam; pause, restart, boot gate
     loop.ts                 Fixed-timestep driver, visibility handling
     layout.ts               Viewport band maths (product spec §2)
     persistence.ts          localStorage: high score
   sim/                      Pure, DOM-free (architecture §3)
     step.ts                 One tick: step(state, input, dt) -> state
+    phases.ts               Game flow: transition table + per-phase handlers
     movement.ts             Grid motion, turn buffering, tunnel wrap
-    state.ts                Initial state and cheap cloning
+    state.ts                Initial state, resets, cheap cloning
     maze.ts                 Tile queries and the pellet bitmap
     levels.ts               Per-level tuning table
     rng.ts                  Seeded xorshift32
@@ -93,7 +95,7 @@ src/
     viewport.ts             Tile<->pixel transforms, DPR handling
     maze-layer.ts           Procedural maze, redrawn per level
     entity-layer.ts         Pellets and actors, per frame, interpolated
-    overlay-layer.ts        READY!/GAME OVER, redrawn on change
+    overlay-layer.ts        The card for the current phase, redrawn on change
   input/
     controller.ts           Arbitration and latching
     joystick.ts             Dead zone, 4-way snapping, hysteresis (no DOM)
@@ -103,16 +105,16 @@ src/
   data/maze-classic.ts      28 x 31 board, 244 collectibles
   styles/main.css           Bands, safe areas, joystick
 tests/
-  sim/                      Movement and PRNG, headless
+  sim/                      Movement, the phase machine, the PRNG — headless
   app/                      Layout and viewport snapshots
   input/                    Joystick maths, synthetic pointer sequences
   replays/                  Replay driver, digest, recorded streams
   boundary/                 The sim/ isolation rule, enforced
-  dom/                      jsdom: the HUD
+  dom/                      jsdom: the HUD, the loop, the app wiring
   e2e/                      Playwright: mobile emulation smoke test
 ```
 
-Four invariants hold this together, and each has a cost to give up:
+Five invariants hold this together, and each has a cost to give up:
 
 - **The simulation is pure.** `sim/` has no DOM, no timers, and no randomness
   beyond a seeded PRNG, so `step(state, input, dt)` is reproducible. That is
@@ -128,18 +130,42 @@ Four invariants hold this together, and each has a cost to give up:
 - **Input is intent, not action.** Pointer handlers only store a raw position.
   Snapping, dead zone and hysteresis run once per tick, and the result is a
   direction *request* the simulation applies when it becomes legal.
+- **Game flow is a table, not a tangle.** Every screen the game can be on is a
+  `phase`, and the only way between two of them is an entry in the transition
+  table in `sim/phases.ts`. Nothing outside that module assigns `state.phase`;
+  the app can only send events and be ignored if they do not apply.
+
+### Game flow
+
+`Boot → Attract → Ready → Playing → {Dying → Ready | LevelComplete → Ready |
+GameOver → Attract}`, with `Paused` suspending whatever sits underneath it
+(product spec §4.6). Two consequences worth knowing:
+
+- **Pause is free.** The simulation is a pure function of its state, so a paused
+  game is one that is not being called. There are no clocks to freeze and no
+  timers to cancel; `Paused` simply has no `update`. Backgrounding the tab
+  cancels the RAF and pauses; coming back paints the pause card rather than
+  dropping the player into a moving Pac-Man.
+- **Resuming is not re-entering.** Pause and resume skip the underlying phase's
+  `enter`/`exit` handlers, so pausing two seconds into the countdown resumes two
+  seconds into the countdown instead of restarting it.
+
+`Boot` and `Attract` both exist and both currently last a single microtask:
+`main.ts` opens the boot gate as soon as its (empty) asset load resolves, then
+starts the game itself. The attract screen and the TAP TO PLAY target that
+should own that second gesture are `TODO(ui)`.
 
 ## Testing
 
 | Layer                | Runner                   | What it covers                                                      |
 | -------------------- | ------------------------ | ------------------------------------------------------------------- |
-| `tests/sim`          | Vitest, Node             | Turn legality, wall stops, turn-buffer expiry, tunnel wrap, the PRNG |
+| `tests/sim`          | Vitest, Node             | Turn legality, wall stops, turn-buffer expiry, tunnel wrap, the phase machine, the PRNG |
 | `tests/app`          | Vitest, Node             | Layout bands and viewport fitting, snapshotted over a device matrix  |
 | `tests/input`        | Vitest, Node             | Dead zone, 4-way snapping, hysteresis, latching                      |
 | `tests/replays`      | Vitest, Node             | A scripted input stream run headless, hashed to one digest           |
 | `tests/boundary`     | Vitest, Node             | The `sim/` isolation rule                                            |
-| `tests/dom`          | Vitest, jsdom            | The HUD                                                              |
-| `tests/e2e`          | Playwright, WebKit + Chromium | Mounting, layout, the render loop, and pointer-driven steering  |
+| `tests/dom`          | Vitest, jsdom            | The HUD; the loop, on a fake clock; the app's pause and boot wiring   |
+| `tests/e2e`          | Playwright, WebKit + Chromium | Mounting, layout, the render loop, pause and resume, and pointer-driven steering |
 
 Two things about this setup are deliberate.
 
@@ -191,24 +217,31 @@ The type-level half of the same rule is the two-project tsconfig: `src/` gets
 ## Status
 
 Working: build tooling, the fixed-timestep loop with visibility suspend, the
-three-layer renderer with DPR-capped viewport fitting, grid-locked movement
-with turn buffering and tunnel wrap, the floating joystick with dead zone and
-hysteresis, keyboard input, the HUD, and the portrait/landscape layout.
+game-flow state machine with pause and restart, the three-layer renderer with
+DPR-capped viewport fitting, grid-locked movement with turn buffering and
+tunnel wrap, the floating joystick with dead zone and hysteresis, keyboard
+input, the HUD, and the portrait/landscape layout.
 
 Not built yet, each marked with a `TODO(area)` comment where it belongs:
 
-- `TODO(mechanics)` — pellet collection, scoring, collisions, lives, the level
-  table, and cornering
+- `TODO(mechanics)` — pellet collection, scoring, collisions, the level table,
+  and cornering. The phases they drive already exist: collision returns
+  `PacmanCaught` from `Playing.update` and the rest follows.
 - `TODO(ghosts)` — the shared movement engine, the four targeting rules,
   scatter/chase scheduling, house release, and the no-up tiles
 - `TODO(render)` — the sprite atlas, arcade wall shapes, bitmap glyphs
-- `TODO(audio)` — the audio sprite and the event-driven director
-- `TODO(ui)` — attract, pause, game over and intermission screens
+- `TODO(audio)` — the audio sprite and the event-driven director. The event
+  queue it consumes is already drained once per tick in `app/game.ts`.
+- `TODO(ui)` — the attract screen, the pause overlay's Resume/Restart/Sound
+  controls, game over and intermission screens. The phases behind them all
+  exist and are reachable; what is missing is the chrome.
+- `TODO(assets)` — the boot gate in `main.ts` resolves immediately because
+  nothing is loaded yet
 
 The test harness is in place — see [Testing](#testing). Still outstanding from
 the architecture doc: the PWA service worker and manifest (§8.2, build order
 step 9), the CI bundle-size gate (§7 — the budget is 120 kB gzipped and the
-bundle is currently 6.2 kB, so nothing enforces it yet), and ESLint, which is
+bundle is currently 7.6 kB, so nothing enforces it yet), and ESLint, which is
 blocked on TypeScript 7 support.
 
 The suites themselves are only as deep as the skeleton is. The architecture's
@@ -228,12 +261,18 @@ noted as still manual.
   regression test is the shorter scripted replay in `tests/replays`)*
 - Turn buffer expires at 383 ms against the spec's 400 ms window (one tick of
   accounting), and a pre-turn is honoured at the next junction
+- The timed phases last exactly what they claim: Ready is 180 ticks, not the 181
+  that repeated float subtraction would otherwise cost
+- One second of wall clock is 60 ticks at 100 fps and 60 ticks at 33 fps, and a
+  four-second stall is clamped to 15 ticks rather than 240
+- Pausing freezes the simulation while the loop keeps painting, and resuming
+  leaves the countdown, positions and score exactly as they were
 - Reversal turns on the spot mid-corridor, as the spec requires
 - Two identical runs produce bit-identical state
 - Joystick hysteresis holds at a 1.10x challenge and switches at 1.20x, per the
   spec's 15% margin
 - Viewport caps DPR at 3 and snaps the tile size to whole device pixels
-- Production bundle is 6.2 kB gzipped, against the architecture's 120 kB budget
+- Production bundle is 7.6 kB gzipped, against the architecture's 120 kB budget
   *(manual — the CI gate from architecture §7 is not built)*
 - The page mounts, fits and runs its loop on Android and iOS emulation, and a
   synthetic drag on the joystick steers Pac-Man, with no console errors
