@@ -109,7 +109,8 @@ tests/
   replays/                  Replay driver, digest, recorded streams
   boundary/                 The sim/ isolation rule, enforced
   dom/                      jsdom: the HUD
-  e2e/                      Playwright: mobile emulation smoke test
+  e2e/                      Playwright: mobile emulation smoke test and the
+                            size/orientation matrix
 ```
 
 Four invariants hold this together, and each has a cost to give up:
@@ -139,7 +140,7 @@ Four invariants hold this together, and each has a cost to give up:
 | `tests/replays`      | Vitest, Node             | A scripted input stream run headless, hashed to one digest           |
 | `tests/boundary`     | Vitest, Node             | The `sim/` isolation rule                                            |
 | `tests/dom`          | Vitest, jsdom            | The HUD                                                              |
-| `tests/e2e`          | Playwright, WebKit + Chromium | Mounting, layout, the render loop, and pointer-driven steering  |
+| `tests/e2e`          | Playwright, WebKit + Chromium | Mounting, the render loop, pointer-driven steering, rotation, and a nine-size layout matrix |
 
 Two things about this setup are deliberate.
 
@@ -193,7 +194,8 @@ The type-level half of the same rule is the two-project tsconfig: `src/` gets
 Working: build tooling, the fixed-timestep loop with visibility suspend, the
 three-layer renderer with DPR-capped viewport fitting, grid-locked movement
 with turn buffering and tunnel wrap, the floating joystick with dead zone and
-hysteresis, keyboard input, the HUD, and the portrait/landscape layout.
+hysteresis (pinned bottom-left at tablet widths, per spec §2.1), keyboard input,
+the HUD, and the portrait/landscape layout.
 
 Not built yet, each marked with a `TODO(area)` comment where it belongs:
 
@@ -237,6 +239,11 @@ noted as still manual.
   *(manual — the CI gate from architecture §7 is not built)*
 - The page mounts, fits and runs its loop on Android and iOS emulation, and a
   synthetic drag on the joystick steers Pac-Man, with no console errors
+- Nine sizes spanning the spec's 320x568–1024x1366 support range, in both
+  orientations and on both engines: the maze layer is actually painted, nothing
+  overflows the viewport, and the document never scrolls
+- Rotating to landscape and back re-fits the board rather than leaving it at its
+  previous size
 
 ### Known discrepancy
 
