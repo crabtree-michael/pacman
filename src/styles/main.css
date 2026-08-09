@@ -137,6 +137,44 @@ body {
   display: block;
 }
 
+/* Pause menu (product spec §2.3) -------------------------------------- */
+
+/*
+ * Shown only while the game is paused, on the phase the view mirrors onto the
+ * app element. `display: none` rather than opacity: an option that is not on
+ * screen must be out of the tab order and out of the accessibility tree too.
+ *
+ * It sits low over the board, clear of the PAUSED card above it and of the
+ * middle, which is where a thumb goes for tap-to-resume.
+ */
+.pause-menu {
+  position: absolute;
+  bottom: 6%;
+  left: 50%;
+  display: none;
+  gap: 0.75rem;
+  transform: translateX(-50%);
+}
+
+.app[data-phase='Paused'] .pause-menu {
+  display: flex;
+}
+
+.pause-menu__button {
+  /* Every tappable target is at least 44 x 44 CSS px (spec §2.4). */
+  min-height: 44px;
+  padding: 0 1.25rem;
+  color: var(--color-accent);
+  font: inherit;
+  font-size: 0.8125rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(0, 0, 0, 0.85);
+  border: 2px solid var(--color-accent);
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
 /* Status strip ------------------------------------------------------- */
 
 .status {

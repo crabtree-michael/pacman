@@ -24,6 +24,14 @@ async function readScore(page: Page): Promise<number> {
   return Number.parseInt((await page.locator('[data-hud="score"]').textContent()) ?? '0', 10);
 }
 
+/** The HUD's high score, as a number. */
+async function readHighScore(page: Page): Promise<number> {
+  return Number.parseInt(
+    (await page.locator('[data-hud="high-score"]').textContent()) ?? '0',
+    10,
+  );
+}
+
 /** The score once it stops climbing — Pac-Man has run out of corridor. */
 async function settledScore(page: Page): Promise<number> {
   let last = await readScore(page);
@@ -335,6 +343,41 @@ test.describe('skeleton smoke', () => {
       })
       .not.toBe(frozen);
     expect(await layerFrame(page, '#layer-overlay')).toBe(playingOverlay);
+  });
+
+  /**
+   * New Game, the pause screen's own option (product spec §2.3).
+   *
+   * It exists only while the game is paused, and taking it has to give a real
+   * new game — the score back to zero and the countdown running again — with
+   * the high score the abandoned game earned still on the HUD.
+   */
+  test('starts a new game from the pause screen', async ({ page }) => {
+    await page.goto('/');
+    await startPlay(page);
+    await page.waitForTimeout(READY_MS + 200); // Let the countdown finish.
+
+    // Pac-Man eats his way to the wall unaided, so by the time the button is
+    // pressed there is a game on the board worth abandoning.
+    const scored = await settledScore(page);
+    expect(scored).toBeGreaterThan(0);
+
+    const app = page.locator('#app');
+    const newGame = page.locator('[data-action="new-game"]');
+    // Not a HUD button: during play there is no pause screen to put it on.
+    await expect(newGame).toBeHidden();
+
+    await page.locator('[data-action="pause"]').click();
+    await expect(app).toHaveAttribute('data-phase', 'Paused');
+    await expect(newGame).toBeVisible();
+
+    await newGame.click();
+    await expect(app).toHaveAttribute('data-phase', 'Ready');
+    await expect(newGame).toBeHidden();
+    // Read inside the countdown, before the fresh game has eaten anything.
+    expect(await readScore(page)).toBe(0);
+    // The high score outlives the game that set it.
+    expect(await readHighScore(page)).toBe(scored);
   });
 
   test('re-lays out in landscape and keeps the lives visible', async ({ page }, testInfo) => {

@@ -55,6 +55,17 @@
           <canvas class="stage__layer" id="layer-entities"></canvas>
           <canvas class="stage__layer" id="layer-overlay"></canvas>
         </div>
+
+        <!-- The pause card itself is canvas; its options are DOM, so they are
+             real hit targets that assistive tech can find. Deliberately a
+             sibling of the board rather than a child: the board is the swipe
+             surface, and a tap captured as the start of a flick is a tap the
+             button might never see. -->
+        <div class="pause-menu" data-pause-menu>
+          <button class="pause-menu__button" type="button" data-action="new-game">
+            New Game
+          </button>
+        </div>
       </main>
 
       <!-- Lives on the left, the fruit of the levels reached on the right

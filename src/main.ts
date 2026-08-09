@@ -40,6 +40,7 @@ const controlZone = required<HTMLElement>('#control-zone');
 const board = required<HTMLElement>('#board');
 const pauseButton = required<HTMLButtonElement>('[data-action="pause"]');
 const soundButton = required<HTMLButtonElement>('[data-action="sound"]');
+const newGameButton = required<HTMLButtonElement>('[data-action="new-game"]');
 const bootError = required<HTMLElement>('#boot-error');
 
 // Read once: the renderer's motion decisions are made per level, not per frame,
@@ -175,6 +176,14 @@ pauseButton.addEventListener('click', () => {
 });
 
 soundButton.addEventListener('click', () => applySound(!settings.sound));
+
+// The pause screen's New Game (product spec §2.3). `restart` only applies from
+// `Paused` and `GameOver`, and the button is only on screen for the first of
+// them, so the phase machine needs no help from here. The high score survives
+// the game it abandons — `Game` has already banked it.
+newGameButton.addEventListener('click', () => {
+  game.restart();
+});
 
 // Tap anywhere on the board to come back from a pause, or to start a game from
 // the attract screen (product spec §2.3). The HUD buttons are excluded: their
