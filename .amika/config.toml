@@ -1,0 +1,28 @@
+# Amika sandbox configuration for this repository.
+#
+# Amika boots each sandbox for this repo from this file. It is versioned with
+# the code and reviewable in pull requests.
+#
+# Resolution precedence (highest first):
+#   1. API request / CLI flags
+#   2. Database (values saved through the web UI)
+#   3. this file
+#   4. built-in defaults
+#
+# Reference: https://docs.amika.dev/reference/config-toml
+
+[env]
+# Vault-backed secret, NOT a literal value.
+#
+# The `{ secret = "..." }` form references a secret by name in the Amika
+# secrets store; Amika resolves it at sandbox-creation time and injects the
+# value as the RENDER_API_KEY environment variable. The value itself never
+# appears in this file or in git history.
+#
+# The secret must be pushed once before creating a sandbox:
+#   amika secret push RENDER_API_KEY=<value>
+# or from an existing local environment variable:
+#   amika secret push --from-env RENDER_API_KEY
+#
+# Verify it is registered with: amika secret list
+RENDER_API_KEY = { secret = "RENDER_API_KEY" }
