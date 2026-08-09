@@ -103,8 +103,10 @@ export function canonical(state: GameState): string {
     `serial=${state.lastInputSerial}`,
     `fright=${String(state.fright.active)}:${state.fright.msRemaining}:${state.fright.ghostsEaten}`,
     `remaining=${state.maze.remaining}`,
+    `dots=${state.dotsEaten}`,
+    `fruit=${fruitPart(state.fruit)}:${state.fruitsShown}`,
     `pellets=${pelletChecksum(state.maze.pellets)}`,
-    `pacman=${state.pacman.x},${state.pacman.y},${state.pacman.dir},${state.pacman.pendingDir},${state.pacman.pendingAge.toFixed(6)},${state.pacman.animTicks}`,
+    `pacman=${state.pacman.x},${state.pacman.y},${state.pacman.dir},${state.pacman.pendingDir},${state.pacman.pendingAge.toFixed(6)},${state.pacman.stallTicks},${state.pacman.animTicks}`,
   ];
 
   for (const ghost of state.ghosts) {
@@ -113,6 +115,11 @@ export function canonical(state: GameState): string {
 
   parts.push(`events=${state.events.map((event) => event.type).join('|')}`);
   return parts.join(';');
+}
+
+function fruitPart(fruit: GameState['fruit']): string {
+  if (!fruit) return 'none';
+  return `${fruit.kind}@${fruit.col},${fruit.row}:${fruit.msRemaining.toFixed(6)}`;
 }
 
 function pelletChecksum(pellets: Uint8Array): string {
@@ -143,5 +150,34 @@ export const LAP_REPLAY: Replay = {
     { tick: 520, dir: Direction.Left },
     { tick: 700, dir: Direction.Up },
     { tick: 820, dir: Direction.Left },
+  ],
+};
+
+/**
+ * A run to the bottom-left power pellet, ending mid-fright.
+ *
+ * The lap above never reaches one, and a power pellet is the widest-reaching
+ * event in the game: it scores, it starts a clock, it turns every loose ghost
+ * around, and it costs three ticks of chewing. Ending the replay while the
+ * clock is still running keeps all of that in the digest rather than only its
+ * aftermath.
+ *
+ * The route is spawn → west along row 23 → down to row 26 → west → up column 3
+ * → west onto the pellet at (1, 23). Each turn is requested a few tiles early
+ * and taken at the junction, which is the pre-turn window doing its job.
+ */
+export const POWER_REPLAY: Replay = {
+  name: 'power pellet run',
+  seed: DEFAULT_SEED,
+  // 3 s of Ready, then 7 s of play — the last ~1.3 s of it frightened.
+  ticks: 600,
+  events: [
+    { tick: 180, dir: Direction.Left },
+    // Late enough to clear the opening at column 9, which would otherwise take
+    // this turn a tile and a half early.
+    { tick: 220, dir: Direction.Down },
+    { tick: 260, dir: Direction.Left },
+    { tick: 272, dir: Direction.Up },
+    { tick: 305, dir: Direction.Left },
   ],
 };

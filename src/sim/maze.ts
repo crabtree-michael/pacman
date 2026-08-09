@@ -54,3 +54,22 @@ export function pelletAt(maze: MazeState, col: number, row: number): Pellet {
   const index = row * maze.data.cols + wrapCol(maze.data, col);
   return (maze.pellets[index] ?? Pellet.None) as Pellet;
 }
+
+/**
+ * Take the collectible on a tile, if there is one. Returns what was taken.
+ *
+ * The bitmap is copied before it is written, never mutated in place: `step`
+ * hands the renderer the previous state alongside the new one, and a shared
+ * array would retro-actively eat the pellet out of the frame being
+ * interpolated from. The copy costs 868 bytes on the ~244 ticks a level that
+ * change it, and nothing on the rest (architecture §2.4, `state.ts`).
+ */
+export function takePelletAt(maze: MazeState, col: number, row: number): Pellet {
+  const pellet = pelletAt(maze, col, row);
+  if (pellet === Pellet.None) return Pellet.None;
+
+  maze.pellets = new Uint8Array(maze.pellets);
+  maze.pellets[row * maze.data.cols + wrapCol(maze.data, col)] = Pellet.None;
+  maze.remaining--;
+  return pellet;
+}

@@ -36,6 +36,8 @@ export interface MazeData {
     pinky: MazeSpawn;
     inky: MazeSpawn;
     clyde: MazeSpawn;
+    /** Where the bonus fruit appears — below the ghost house (spec §4.4). */
+    fruit: MazeSpawn;
   };
   /** Row the side tunnel runs along. */
   tunnelRow: number;
@@ -96,6 +98,9 @@ export const MAZE_CLASSIC: MazeData = {
     pinky: { x: 13, y: 14 },
     inky: { x: 11, y: 14 },
     clyde: { x: 15, y: 14 },
+    // The corridor immediately under the house, on the loop that rings it.
+    // It carries no pellets, so the fruit never hides one.
+    fruit: { x: 13, y: 17 },
   },
   tunnelRow: 14,
   noUpTiles: [],

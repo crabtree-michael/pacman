@@ -1,12 +1,17 @@
 import { Pellet, pelletAt } from '../sim/maze';
+import { isFrightFlashing } from '../sim/modes';
 import {
   Direction,
+  DIRECTION_DELTA,
+  GhostMode,
   SUBTILE,
   type Actor,
+  type FruitState,
   type GameState,
   type GhostState,
   type PacmanState,
 } from '../sim/types';
+import { FRUIT_COLORS } from './palette';
 import { clearTiles, prepareCanvas, type Viewport } from './viewport';
 
 /**
@@ -26,6 +31,13 @@ const GHOST_COLORS: Readonly<Record<string, string>> = {
   inky: '#00ffff',
   clyde: '#ffb852',
 };
+
+const FRIGHT_COLOR = '#2121ff';
+const FRIGHT_FLASH_COLOR = '#f8f8f8';
+/** The frightened face — dot eyes and a wavy mouth, on the blue body. */
+const FRIGHT_FACE_COLOR = '#ffb897';
+const EYE_WHITE = '#ffffff';
+const PUPIL_COLOR = '#2121ff';
 
 /** Canvas angle each direction faces. */
 const FACING: Readonly<Record<Direction, number>> = {
@@ -64,8 +76,9 @@ export class EntityLayer {
 
     clearTiles(context, this.cols, this.rows);
     this.drawPellets(context, current);
+    if (current.fruit) drawFruit(context, current.fruit);
     for (const [index, ghost] of current.ghosts.entries()) {
-      this.drawGhost(context, previous.ghosts[index] ?? ghost, ghost, alpha);
+      this.drawGhost(context, previous.ghosts[index] ?? ghost, ghost, alpha, current);
     }
     this.drawPacman(context, previous.pacman, current.pacman, alpha);
   }
@@ -101,7 +114,11 @@ export class EntityLayer {
     // Chomp from the animation cursor, so the mouth is frame-rate independent.
     const phase = (current.animTicks % CHOMP_PERIOD) / CHOMP_PERIOD;
     const openness = Math.abs(phase * 2 - 1);
-    const halfMouth = openness * 0.3 * Math.PI;
+    // Floored, because a wedge of exactly zero is a zero-length arc, and a
+    // zero-length arc draws nothing at all: Pac-Man blinked out of existence
+    // for the one tick in sixteen where the mouth was fully shut, and stayed
+    // gone if he happened to park against a wall on that frame.
+    const halfMouth = Math.max(openness * 0.3 * Math.PI, 0.02);
     const facing = FACING[current.dir];
 
     context.fillStyle = PACMAN_COLOR;
@@ -114,33 +131,145 @@ export class EntityLayer {
 
   /**
    * TODO(render): replace with the sprite atlas (architecture §5.1) — the
-   * arcade ghost silhouette and its frightened/eyes states need real art, and
-   * the spec requires frightened ghosts to differ in shape, not just colour.
+   * arcade ghost silhouette needs real art. The three states it has to tell
+   * apart are here already, because they are gameplay: a player has to know at
+   * a glance whether a ghost can be eaten, is about to stop being edible, or is
+   * a pair of eyes that cannot hurt them.
    */
   private drawGhost(
     context: CanvasRenderingContext2D,
     previous: GhostState,
     current: GhostState,
     alpha: number,
+    state: GameState,
   ): void {
     const { x, y } = interpolate(previous, current, alpha, this.cols);
     const radius = 0.75;
 
-    context.fillStyle = GHOST_COLORS[current.name] ?? '#ffffff';
+    // Eaten ghosts are eyes only — no body to draw.
+    if (current.mode === GhostMode.Eaten) {
+      drawEyes(context, x, y, radius, current.dir);
+      return;
+    }
+
+    const frightened = current.mode === GhostMode.Frightened;
+    // Colour is never the only signal (product spec §3.4): a frightened ghost
+    // also loses its eyes for dots and gains a wavy skirt, so the state reads
+    // without colour vision, and it flashes before the mode expires.
+    const flashing = frightened && isFrightFlashing(state);
+    context.fillStyle = frightened
+      ? flashing
+        ? FRIGHT_FLASH_COLOR
+        : FRIGHT_COLOR
+      : (GHOST_COLORS[current.name] ?? '#ffffff');
+
     context.beginPath();
     context.arc(x, y - radius * 0.15, radius, Math.PI, 0);
-    context.lineTo(x + radius, y + radius * 0.7);
-    context.lineTo(x - radius, y + radius * 0.7);
+    if (frightened) {
+      appendWavyBase(context, x, y, radius);
+    } else {
+      context.lineTo(x + radius, y + radius * 0.7);
+      context.lineTo(x - radius, y + radius * 0.7);
+    }
     context.closePath();
     context.fill();
 
-    context.fillStyle = '#ffffff';
-    for (const sign of [-1, 1]) {
-      context.beginPath();
-      context.arc(x + sign * radius * 0.38, y - radius * 0.2, radius * 0.26, 0, Math.PI * 2);
-      context.fill();
+    if (frightened) {
+      drawFrightFace(context, x, y, radius, flashing);
+      return;
     }
+    drawEyes(context, x, y, radius, current.dir);
   }
+}
+
+/** The zigzag hem that distinguishes a frightened ghost by shape. */
+function appendWavyBase(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+): void {
+  const base = y + radius * 0.7;
+  const peak = base - radius * 0.28;
+  context.lineTo(x + radius, base);
+  for (const offset of [0.66, 0.33, 0, -0.33, -0.66]) {
+    context.lineTo(x + radius * (offset + 0.165), peak);
+    context.lineTo(x + radius * offset, base);
+  }
+  context.lineTo(x - radius, base);
+}
+
+function drawFrightFace(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  flashing: boolean,
+): void {
+  context.fillStyle = flashing ? FRIGHT_COLOR : FRIGHT_FACE_COLOR;
+  for (const sign of [-1, 1]) {
+    context.beginPath();
+    context.arc(x + sign * radius * 0.36, y - radius * 0.2, radius * 0.14, 0, Math.PI * 2);
+    context.fill();
+  }
+}
+
+/**
+ * The eyes, looking the way the ghost is travelling. On an eaten ghost they
+ * are the whole sprite.
+ */
+function drawEyes(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  dir: Direction,
+): void {
+  const look = DIRECTION_DELTA[dir];
+  for (const sign of [-1, 1]) {
+    const eyeX = x + sign * radius * 0.38;
+    const eyeY = y - radius * 0.2;
+
+    context.fillStyle = EYE_WHITE;
+    context.beginPath();
+    context.arc(eyeX, eyeY, radius * 0.26, 0, Math.PI * 2);
+    context.fill();
+
+    context.fillStyle = PUPIL_COLOR;
+    context.beginPath();
+    context.arc(
+      eyeX + look.x * radius * 0.11,
+      eyeY + look.y * radius * 0.11,
+      radius * 0.13,
+      0,
+      Math.PI * 2,
+    );
+    context.fill();
+  }
+}
+
+/**
+ * The bonus fruit.
+ *
+ * TODO(render): eight distinct fruit shapes come from the atlas (architecture
+ * §5.1). A coloured body and a stem is the stand-in; the colour is the one the
+ * status strip uses for the same level, so the two read as the same object.
+ */
+function drawFruit(context: CanvasRenderingContext2D, fruit: FruitState): void {
+  const x = fruit.col + 0.5;
+  const y = fruit.row + 0.5;
+
+  context.fillStyle = FRUIT_COLORS[fruit.kind];
+  context.beginPath();
+  context.arc(x, y + 0.12, 0.42, 0, Math.PI * 2);
+  context.fill();
+
+  context.strokeStyle = '#3fae4a';
+  context.lineWidth = 0.1;
+  context.beginPath();
+  context.moveTo(x, y - 0.2);
+  context.quadraticCurveTo(x + 0.22, y - 0.5, x + 0.42, y - 0.44);
+  context.stroke();
 }
 
 /**

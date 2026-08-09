@@ -30,6 +30,7 @@ function spawnPacman(data: MazeData, level: number): PacmanState {
     animTicks: 0,
     pendingDir: Direction.None,
     pendingAge: 0,
+    stallTicks: 0,
   };
 }
 
@@ -68,6 +69,9 @@ export function createInitialState(
     pacman: spawnPacman(data, level),
     ghosts: spawnGhosts(data, level),
     fright: { active: false, msRemaining: 0, ghostsEaten: 0 },
+    dotsEaten: 0,
+    fruit: null,
+    fruitsShown: 0,
     rng: seed,
     lastInputSerial: 0,
     events: [],
@@ -87,12 +91,17 @@ export function resetActors(state: GameState): void {
   state.pacman = spawnPacman(state.maze.data, state.level);
   state.ghosts = spawnGhosts(state.maze.data, state.level);
   state.fright = { active: false, msRemaining: 0, ghostsEaten: 0 };
+  // An uneaten fruit does not survive a death. Its dot count does, so the
+  // second fruit still arrives on schedule (product spec §4.4).
+  state.fruit = null;
 }
 
 /** Refill the board for `level` and send everyone home. Score and lives carry over. */
 export function startLevel(state: GameState, level: number): void {
   state.level = level;
   state.maze = createMazeState(state.maze.data);
+  state.dotsEaten = 0;
+  state.fruitsShown = 0;
   resetActors(state);
 }
 
@@ -124,6 +133,7 @@ export function cloneState(state: GameState): GameState {
       { ...state.ghosts[3] },
     ],
     fright: { ...state.fright },
+    fruit: state.fruit === null ? null : { ...state.fruit },
     events: [],
   };
 }

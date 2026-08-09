@@ -1,4 +1,7 @@
-import { moveGhost, movePacman } from './movement';
+import { updateFruit } from './fruit';
+import { updateFright } from './modes';
+import { moveGhost } from './movement';
+import { resolveGhostContact, updatePacman } from './pacman';
 import { cloneState, resetActors, resetGame, startLevel } from './state';
 import { Direction, Phase, type GameState, type InputSnapshot } from './types';
 
@@ -165,16 +168,23 @@ const HANDLERS: Readonly<Record<Phase, PhaseHandlers>> = {
   [Phase.Playing]: {
     update(state, input, stepMs) {
       applyInput(state, input);
-      movePacman(state.maze.data, state.pacman, stepMs);
+      // The two clocks tick before anything eats, so a power pellet or a fruit
+      // taken on this tick gets its full duration rather than 16 ms less — the
+      // same "enter now, update next tick" rule the phase clocks follow.
+      updateFright(state, stepMs);
+      updateFruit(state, stepMs);
+
+      updatePacman(state, stepMs);
       for (const ghost of state.ghosts) {
         moveGhost(state.maze.data, ghost, stepMs);
       }
 
-      // TODO(mechanics): pellet collection and scoring, the power-pellet
-      // frightened timer, the extra life at 10,000, and fruit. Collision with a
-      // ghost returns `PacmanCaught` from here — the phase machine already
-      // knows what to do with it.
-      if (state.maze.remaining === 0) return PhaseEvent.BoardCleared;
+      // Contact is resolved after both sides have moved, so a ghost that walks
+      // onto Pac-Man and one Pac-Man walks onto are the same event.
+      if (resolveGhostContact(state)) return PhaseEvent.PacmanCaught;
+      // `<= 0` rather than `=== 0`: a test or a future mechanic that empties
+      // the board by hand should still end the level on the next tick.
+      if (state.maze.remaining <= 0) return PhaseEvent.BoardCleared;
       return null;
     },
   },
