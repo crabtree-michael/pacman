@@ -11,7 +11,15 @@ import { defineConfig } from 'vitest/config';
  *
  * Playwright owns `tests/e2e`; it is excluded here so the two runners never
  * pick up each other's specs.
+ *
+ * A spec named `*.dom.test.ts` runs under jsdom wherever it lives. Some layers
+ * — the input sources most of all — have a headless half and a DOM half that
+ * belong in the same directory, and naming the environment beats scattering
+ * them by runner or flipping it per file with a docblock the projects cannot
+ * see.
  */
+const DOM_SPECS = 'tests/**/*.dom.test.ts';
+
 export default defineConfig({
   test: {
     projects: [
@@ -20,13 +28,14 @@ export default defineConfig({
           name: 'node',
           environment: 'node',
           include: ['tests/{sim,app,input,replays,boundary}/**/*.test.ts'],
+          exclude: [DOM_SPECS],
         },
       },
       {
         test: {
           name: 'dom',
           environment: 'jsdom',
-          include: ['tests/dom/**/*.test.ts'],
+          include: ['tests/dom/**/*.test.ts', DOM_SPECS],
         },
       },
     ],

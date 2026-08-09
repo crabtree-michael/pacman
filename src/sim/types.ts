@@ -95,12 +95,35 @@ export interface PacmanState extends Actor {
   pendingDir: Direction;
   /** Ticks the pending request has been waiting; expires per the spec's window. */
   pendingAge: number;
+  /**
+   * Ticks of movement owed to chewing (product spec §4.2).
+   *
+   * Eating costs Pac-Man a frame or three of motion. The effect is kept because
+   * it changes ghost-escape maths, not for looks.
+   */
+  stallTicks: number;
 }
 
 export type GhostName = 'blinky' | 'pinky' | 'inky' | 'clyde';
 
+/** A board position in whole tiles. Targets may sit outside the walls. */
+export interface Tile {
+  col: number;
+  row: number;
+}
+
+/**
+ * What a ghost is doing (product spec §4.3).
+ *
+ * `Leaving` is not one of the spec's four modes: it is the walk from a spot in
+ * the house out through the door, which is neither waiting nor yet play. It
+ * earns a mode of its own because it is the one stretch where a ghost ignores
+ * the maze — the door is a wall to everything that reads the board — and
+ * because a ghost part-way out is not something Pac-Man can run into.
+ */
 export const GhostMode = {
   House: 'House',
+  Leaving: 'Leaving',
   Scatter: 'Scatter',
   Chase: 'Chase',
   Frightened: 'Frightened',
@@ -113,6 +136,26 @@ export interface GhostState extends Actor {
   mode: GhostMode;
 }
 
+/**
+ * The global scatter/chase cursor (product spec §4.3, architecture §3.2).
+ *
+ * One index into the level's schedule and the time left on the current entry.
+ * The alternation is the schedule's shape rather than a flag, so "which mode
+ * are we in" is a property of the cursor and cannot drift out of step with it.
+ */
+export interface ModeScheduler {
+  index: number;
+  msRemaining: number;
+}
+
+/** The dot counter and the fallback clock that let ghosts out (spec §4.3). */
+export interface HouseState {
+  /** Collectibles eaten since the last time the house filled up. */
+  dots: number;
+  /** Milliseconds since the last one, for the no-dots-eaten timeout. */
+  msSinceDot: number;
+}
+
 export interface MazeState {
   data: MazeData;
   /** One byte per tile: 0 none, 1 pellet, 2 power pellet. */
@@ -120,10 +163,37 @@ export interface MazeState {
   remaining: number;
 }
 
+/** The bonus fruit a level offers; which one is a level-table lookup. */
+export type FruitKind =
+  | 'cherry'
+  | 'strawberry'
+  | 'orange'
+  | 'apple'
+  | 'melon'
+  | 'galaxian'
+  | 'bell'
+  | 'key';
+
+/**
+ * The bonus fruit that appears below the ghost house twice a level
+ * (product spec §4.4).
+ */
+export interface FruitState {
+  kind: FruitKind;
+  points: number;
+  /** Tile it sits on — from the maze data, so a second layout can move it. */
+  col: number;
+  row: number;
+  /** Milliseconds before it disappears uneaten. */
+  msRemaining: number;
+}
+
 export type GameEvent =
   | { type: 'PelletEaten'; x: number; y: number }
   | { type: 'PowerPelletEaten'; x: number; y: number }
   | { type: 'GhostEaten'; name: GhostName; points: number }
+  | { type: 'FruitAppeared'; kind: FruitKind }
+  | { type: 'FruitEaten'; kind: FruitKind; points: number }
   | { type: 'Death' }
   | { type: 'LevelCleared' }
   | { type: 'ExtraLife' }
@@ -151,7 +221,28 @@ export interface GameState {
   maze: MazeState;
   pacman: PacmanState;
   ghosts: readonly [GhostState, GhostState, GhostState, GhostState];
+  /** Where the scatter/chase alternation has got to (product spec §4.3). */
+  modeTimer: ModeScheduler;
+  house: HouseState;
   fright: { active: boolean; msRemaining: number; ghostsEaten: number };
+  /**
+   * Milliseconds the board is held still for, with the score bubble over a
+   * ghost that was just eaten (product spec §4.4's ladder, arcade timing).
+   *
+   * A field rather than a phase: nothing about the game *flow* changes for that
+   * second — no card, no reset, and the phase machine would have to give the
+   * pause button a path back out of it. What changes is that `Playing` skips a
+   * tick of everything, which is one branch.
+   */
+  freezeMs: number;
+  /**
+   * Collectibles eaten on this level. Drives the two fruit appearances
+   * (product spec §4.4) and, when ghosts land, the house dot counters (§4.3).
+   */
+  dotsEaten: number;
+  fruit: FruitState | null;
+  /** How many of the level's two fruit have already been offered. */
+  fruitsShown: number;
   /** Seeded PRNG state — a single uint32, so state stays cheap to clone. */
   rng: number;
   /**

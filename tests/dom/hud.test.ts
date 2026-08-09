@@ -17,7 +17,8 @@ function mountHud(): HTMLElement {
     <div data-hud-root>
       <span data-hud="score">00</span>
       <span data-hud="high-score">00</span>
-      <span data-hud="lives">●●●</span>
+      <span data-hud="lives"></span>
+      <span data-hud="levels"></span>
     </div>
   `;
   return document.body;
@@ -25,6 +26,10 @@ function mountHud(): HTMLElement {
 
 function stateWith(overrides: Partial<GameState>): GameState {
   return { ...createInitialState(MAZE_CLASSIC), ...overrides };
+}
+
+function count(selector: string): number {
+  return document.querySelectorAll(selector).length;
 }
 
 describe('Hud', () => {
@@ -37,7 +42,7 @@ describe('Hud', () => {
 
     expect(document.querySelector('[data-hud="score"]')?.textContent).toBe('1230');
     expect(document.querySelector('[data-hud="high-score"]')?.textContent).toBe('4560');
-    expect(document.querySelector('[data-hud="lives"]')?.textContent).toBe('●●');
+    expect(count('[data-hud="lives"] .status__life')).toBe(2);
   });
 
   it('writes to the DOM only when a value changed', () => {
@@ -54,7 +59,26 @@ describe('Hud', () => {
 
   it('handles a game over with no lives left', () => {
     new Hud(document).update(stateWith({ lives: 0 }), 0);
-    expect(document.querySelector('[data-hud="lives"]')?.textContent).toBe('');
+    expect(count('[data-hud="lives"] .status__life')).toBe(0);
+  });
+
+  it("marks the level's fruit, capped at the cabinet's seven", () => {
+    const hud = new Hud(document);
+
+    hud.update(stateWith({ level: 1 }), 0);
+    expect(count('[data-hud="levels"] .status__fruit')).toBe(1);
+    // Level 1 is the cherry, and the board draws it in the same colour.
+    expect(
+      document
+        .querySelector<HTMLElement>('[data-hud="levels"] .status__fruit')
+        ?.style.getPropertyValue('--fruit-color'),
+    ).toBe('#ff2b2b');
+
+    hud.update(stateWith({ level: 4 }), 0);
+    expect(count('[data-hud="levels"] .status__fruit')).toBe(4);
+
+    hud.update(stateWith({ level: 12 }), 0);
+    expect(count('[data-hud="levels"] .status__fruit')).toBe(7);
   });
 
   it('fails loudly if the markup it needs is missing', () => {

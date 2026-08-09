@@ -1,13 +1,16 @@
-import { Game, type GameView } from './app/game';
+import { Game, type GameInput, type GameView } from './app/game';
 import { applyLayout, computeLayout } from './app/layout';
-import { loadHighScore, saveHighScore } from './app/persistence';
+import { loadHighScore, loadSettings, saveHighScore } from './app/persistence';
 import { MAZE_CLASSIC } from './data/maze-classic';
 import { InputController } from './input/controller';
+import { GamepadInput } from './input/gamepad';
+import { Haptics } from './input/haptics';
 import { JoystickView } from './input/joystick-view';
 import { KeyboardInput } from './input/keyboard';
 import { VirtualJoystick } from './input/joystick';
+import { SwipeInput } from './input/swipe';
 import { Renderer } from './render/renderer';
-import { Phase } from './sim/types';
+import { Direction, Phase } from './sim/types';
 import { Hud } from './ui/hud';
 import './styles/main.css';
 
@@ -29,6 +32,7 @@ function required<T extends Element>(selector: string): T {
 
 const app = required<HTMLElement>('#app');
 const controlZone = required<HTMLElement>('#control-zone');
+const board = required<HTMLElement>('#board');
 const pauseButton = required<HTMLButtonElement>('[data-action="pause"]');
 
 const renderer = new Renderer({
@@ -37,16 +41,57 @@ const renderer = new Renderer({
   overlay: required<HTMLCanvasElement>('#layer-overlay'),
 });
 
+// TODO(ui): the settings screen that writes these back is unbuilt, so today
+// this only reads. Everything downstream already honours a change.
+const settings = loadSettings();
+app.dataset['handedness'] = settings.handedness;
+
 const joystick = new VirtualJoystick();
+joystick.setAccessible(settings.largeJoystick);
 const joystickView = new JoystickView(controlZone, joystick);
-const input = new InputController().use(joystick).use(new KeyboardInput());
+
+// Four sources, one pipeline. The controller cannot tell them apart, which is
+// exactly why a recorded intent stream can stand in for all of them (§4.3).
+const swipe = new SwipeInput(board);
+swipe.setEnabled(settings.swipe);
+const controller = new InputController()
+  .use(joystick)
+  .use(swipe)
+  .use(new KeyboardInput())
+  .use(new GamepadInput());
+
+const haptics = new Haptics(settings.haptics);
+
+/**
+ * The controller, with haptics riding along.
+ *
+ * Haptics is a consumer of the pipeline rather than a part of it, so `Game` has
+ * no business knowing it exists. Wrapping here puts the pulse on the per-tick
+ * path — `snapshot()` is read once per tick — and, just as importantly, ties it
+ * to the same `reset()`: `Game` clears the latch on pause and on every entry
+ * into `Ready`, and a cleared latch is not a direction change to buzz about.
+ */
+const input: GameInput = {
+  sample: (nowMs) => controller.sample(nowMs),
+  snapshot: () => {
+    const snapshot = controller.snapshot();
+    haptics.observe(snapshot);
+    return snapshot;
+  },
+  reset: () => {
+    controller.reset();
+    haptics.reset();
+  },
+};
 
 const view: GameView = {
   render(previous, current, alpha) {
     renderer.render(previous, current, alpha);
     // The knob is analogue and driven by the pointer, not the simulation, so it
-    // syncs with the frame rather than with the tick.
-    joystickView.syncKnob();
+    // syncs with the frame rather than with the tick. The ring's tint is the
+    // one part read from state: it shows while the simulation is holding a turn
+    // request and clears when it consumes or expires one (product spec §3.2).
+    joystickView.sync(current.pacman.pendingDir !== Direction.None);
   },
 };
 
@@ -72,7 +117,11 @@ function relayout(): void {
   );
   applyLayout(app, metrics);
   renderer.resize(metrics.mazeWidth, metrics.mazeHeight, state);
-  joystickView.resize();
+  joystickView.resize({
+    tablet: metrics.tablet,
+    orientation: metrics.orientation,
+    handedness: settings.handedness,
+  });
 }
 
 pauseButton.addEventListener('click', () => {
@@ -122,7 +171,8 @@ void loadAssets().then(() => {
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
     game.destroy();
-    input.destroy();
+    // Tears down every registered source, the swipe surface included.
+    controller.destroy();
     joystickView.destroy();
   });
 }

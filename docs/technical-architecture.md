@@ -273,9 +273,9 @@ margin to damp. The joystick's *visual* knob position is read directly from
 `point` (analogue, smooth) while the emitted direction is the quantised value —
 the two are deliberately different.
 
-The origin is fixed because the base is: `JoystickView` measures the ring's
-centre on every layout change, which is also what keeps `getBoundingClientRect`
-out of the pointer handlers (§4.4).
+The origin is fixed because the base is: `JoystickView` computes the ring's
+centre with `restPosition` on every layout change and hands it over, which is
+also what keeps `getBoundingClientRect` out of the pointer handlers (§4.4).
 
 The joystick renders as **DOM elements with CSS transforms**, not on the canvas:
 it is compositor-driven, costs zero canvas fill-rate, animates on the GPU, and

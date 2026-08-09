@@ -11,6 +11,7 @@
   --color-accent: #ffcc00;
   --color-joystick: rgba(255, 255, 255, 0.28);
   --color-joystick-knob: rgba(255, 255, 255, 0.5);
+  --color-joystick-buffered: rgba(255, 204, 0, 0.55);
 
   /* Overwritten by applyLayout() on every layout change. */
   --hud-height: 48px;
@@ -20,8 +21,6 @@
   --control-zone: 180px;
   --joystick-base-size: 128px;
   --joystick-knob-size: 56px;
-  /* Corner inset for the tablet resting position; clears the 16px of spec §2.4. */
-  --joystick-inset: 24px;
 
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -136,13 +135,50 @@ body {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
+  gap: 0.75rem;
   height: var(--status-height);
   padding: 0 1rem;
 }
 
-.status__lives {
-  color: var(--color-accent);
-  letter-spacing: 0.25em;
+.status__lives,
+.status__levels {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/*
+ * The right-hand group takes the slack, so lives stay left and fruit right.
+ * It also wraps: by level 8 the strip is carrying seven fruit, and in
+ * landscape the column it sits in is only as wide as the joystick gutter.
+ */
+.status__levels {
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/*
+ * A life is a Pac-Man, not a dot (product spec §4.5). The wedge is a
+ * conic-gradient rather than an image so it costs no request and stays sharp at
+ * any density; the atlas sprite replaces it with the animated one.
+ */
+.status__life {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 205deg,
+    var(--color-accent) 0deg 310deg,
+    transparent 310deg 360deg
+  );
+}
+
+.status__fruit {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50% 50% 55% 55%;
+  background: var(--fruit-color, var(--color-accent));
 }
 
 /* Control zone ------------------------------------------------------- */
@@ -154,36 +190,30 @@ body {
   touch-action: none;
 }
 
+/*
+ * JoystickView owns where the ring is, as a single translate to a zone-local
+ * point — centred on a phone, cornered on a tablet (product spec §2.1, §3.2).
+ * The stick is static, so that translate only ever changes on a relayout;
+ * keeping position in one property leaves a single source of truth for it.
+ */
 .joystick__base {
   position: absolute;
-  bottom: 50%;
-  left: 50%;
+  top: 0;
+  left: 0;
   width: var(--joystick-base-size);
   height: var(--joystick-base-size);
   border: 2px solid var(--color-joystick);
   border-radius: 50%;
   opacity: 0.4;
-  /* The ring never moves (product spec §3.2), so its place is pure CSS: the
-     translate keeps the left/bottom pair centre-relative. */
-  transform: translate(-50%, 50%);
+  /* Opacity eases; position never does. A relayout has to land where the new
+     bands put it without gliding across the screen to get there. */
   transition: opacity 200ms ease-out;
+  will-change: transform;
 }
 
-/* Touching the band lights the ring up; it does not move it. */
+/* Held: full opacity. The ring lights up under the thumb but does not move. */
 .joystick__base--active {
   opacity: 1;
-}
-
-/*
- * On a screen wider than a thumb arc the stick sits bottom-left rather than
- * centred (product spec §2.1) — still a fixed spot, just a different one.
- *
- * The inset clears the spec's 16 px safe-area margin (§2.4); `bottom` carries
- * the extra half-diameter because the transform translates down 50%.
- */
-.app[data-tablet='true'][data-orientation='portrait'] .joystick__base {
-  left: calc(var(--joystick-inset) + var(--joystick-base-size) / 2);
-  bottom: calc(var(--joystick-inset) + var(--joystick-base-size) / 2);
 }
 
 .joystick__knob {
@@ -197,6 +227,64 @@ body {
   transform: translate(-50%, -50%);
   /* Keep the knob on the compositor; it moves every frame while dragging. */
   will-change: transform;
+}
+
+/*
+ * A turn request is buffered and waiting for a legal moment to fire. The ring
+ * clears the instant the simulation consumes it, which is what makes the
+ * pre-turn window legible rather than mysterious (product spec §3.2).
+ */
+.joystick__knob--buffered {
+  box-shadow: 0 0 0 3px var(--color-joystick-buffered);
+}
+
+/* Chevron: the quantised direction, on the ring (product spec §3.2). --------- */
+
+.joystick__chevron {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--joystick-base-size);
+  height: var(--joystick-base-size);
+  opacity: 0;
+  transform: translate(-50%, -50%) rotate(var(--joystick-chevron-angle, 0deg));
+  transition:
+    opacity 120ms ease-out,
+    transform 120ms ease-out;
+  pointer-events: none;
+}
+
+/* Drawn once pointing up; the parent's rotation aims it. */
+.joystick__chevron::before {
+  content: '';
+  position: absolute;
+  top: calc(var(--joystick-base-size) * 0.06);
+  left: 50%;
+  width: calc(var(--joystick-base-size) * 0.11);
+  height: calc(var(--joystick-base-size) * 0.11);
+  border-top: 3px solid var(--color-accent);
+  border-left: 3px solid var(--color-accent);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.joystick__base:not([data-direction='none']) .joystick__chevron {
+  opacity: 1;
+}
+
+.joystick__base[data-direction='up'] {
+  --joystick-chevron-angle: 0deg;
+}
+
+.joystick__base[data-direction='right'] {
+  --joystick-chevron-angle: 90deg;
+}
+
+.joystick__base[data-direction='down'] {
+  --joystick-chevron-angle: 180deg;
+}
+
+.joystick__base[data-direction='left'] {
+  --joystick-chevron-angle: -90deg;
 }
 
 /* Landscape: joystick gutter | maze | HUD, per spec §2.2. --------------- */
@@ -239,13 +327,40 @@ body {
 .app[data-orientation='landscape'] .status {
   grid-area: status;
   justify-content: flex-end;
+  flex-wrap: wrap;
   /* The band's height is zero in landscape; the content sizes this cell. */
   height: auto;
+}
+
+/* Right-aligned as one group here, rather than pushed to opposite ends. */
+.app[data-orientation='landscape'] .status__levels {
+  margin-left: 0;
 }
 
 .app[data-orientation='landscape'] .control-zone {
   grid-area: control;
   height: auto;
+}
+
+/*
+ * Right-handed: mirror the columns, so the gutter the thumb reaches is the one
+ * under it (product spec §2.2, §3.4). The grid areas swap rather than a
+ * `scaleX(-1)` on the container, which would mirror the HUD text too.
+ */
+.app[data-orientation='landscape'][data-handedness='right'] {
+  grid-template-areas:
+    '. stage control'
+    'hud stage control'
+    'status stage control'
+    '. stage control';
+}
+
+.app[data-orientation='landscape'][data-handedness='right'] .hud {
+  align-items: flex-start;
+}
+
+.app[data-orientation='landscape'][data-handedness='right'] .status {
+  justify-content: flex-start;
 }
 
 /* Too-small fallback (spec §5) ---------------------------------------- */

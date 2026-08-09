@@ -5,10 +5,9 @@ import { expect, test, type Page } from '@playwright/test';
  * load the page on a mobile profile, drive synthetic pointer events, and assert
  * the game responds.
  *
- * It asserts what the skeleton actually does today — mount, fit, run the loop,
- * accept steering. The architecture's eventual "assert the score changes" needs
- * pellet collection, which is `TODO(mechanics)`; the hook for it is at the end
- * of this file.
+ * It asserts what the game actually does today — mount, fit, run the loop,
+ * accept steering, and put points on the board when a drag takes Pac-Man over a
+ * pellet, which is the architecture's own wording for this test.
  */
 
 /** Pixels of one canvas layer, as a stable string. Empty until the first draw. */
@@ -17,6 +16,23 @@ async function layerFrame(page: Page, selector: string): Promise<string> {
     const canvas = document.querySelector<HTMLCanvasElement>(id);
     return canvas ? canvas.toDataURL() : '';
   }, selector);
+}
+
+/** The HUD's score, as a number. */
+async function readScore(page: Page): Promise<number> {
+  return Number.parseInt((await page.locator('[data-hud="score"]').textContent()) ?? '0', 10);
+}
+
+/** The score once it stops climbing — Pac-Man has run out of corridor. */
+async function settledScore(page: Page): Promise<number> {
+  let last = await readScore(page);
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await page.waitForTimeout(150);
+    const next = await readScore(page);
+    if (next === last && next > 0) return next;
+    last = next;
+  }
+  throw new Error('the score never settled');
 }
 
 async function entityFrame(page: Page): Promise<string> {
@@ -90,7 +106,9 @@ test.describe('skeleton smoke', () => {
     await page.goto('/');
 
     await expect(page.locator('[data-hud="score"]')).toHaveText('00');
-    await expect(page.locator('[data-hud="lives"]')).toHaveText('●●●');
+    await expect(page.locator('[data-hud="lives"] .status__life')).toHaveCount(3);
+    // Level 1, so one fruit marker: the cherry (product spec §2.1, §4.4).
+    await expect(page.locator('[data-hud="levels"] .status__fruit')).toHaveCount(1);
   });
 
   test('runs the loop: the entity layer is still during Ready and moves in Playing', async ({
@@ -107,12 +125,10 @@ test.describe('skeleton smoke', () => {
     // Past the countdown Pac-Man walks off on his own, so the layer must change.
     //
     // Sampled continuously across the end of the countdown rather than at two
-    // chosen moments: with no pellets to eat and no ghosts to dodge, he reaches
-    // the wall at the end of his corridor and stops for good less than a second
-    // into play. Any pair of samples taken after that compares two identical
-    // parked frames, whatever the wait before them was.
-    // TODO(mechanics): once he has somewhere to be, this can go back to a sleep
-    // and a single comparison.
+    // chosen moments: with nobody steering and no ghosts to dodge, he eats his
+    // way to the wall at the end of his corridor and stops there for good about
+    // a second into play. Any pair of samples taken after that compares two
+    // identical parked frames, whatever the wait before them was.
     const frames = new Set<string>();
     const deadline = Date.now() + READY_MS + 1000;
     while (Date.now() < deadline) {
@@ -167,19 +183,27 @@ test.describe('skeleton smoke', () => {
     await expect.poll(transform).toBe(CENTRED);
   });
 
-  test('steers Pac-Man with a synthetic drag', async ({ page }) => {
+  test('steers Pac-Man with a synthetic drag, and the score follows', async ({ page }) => {
     await page.goto('/');
     await page.waitForTimeout(READY_MS + 200); // Let the countdown finish.
+
+    // Pac-Man walks off to the left on his own and eats his way to the wall at
+    // the end of that corridor. Waiting for the score to stop climbing is what
+    // makes the rest of this test about the drag rather than about the walk he
+    // was already taking.
+    const parked = await settledScore(page);
+    expect(parked).toBeGreaterThan(0);
 
     const zone = page.locator('#control-zone');
     const box = (await zone.boundingBox())!;
     const centreX = box.x + box.width / 2;
     const centreY = box.y + box.height / 2;
 
-    // Pac-Man spawns walking left down a corridor with walls above and below,
-    // so a downward flick must not move him — but a rightward one reverses him
-    // on the spot. Comparing the two frames is the cheapest proof that the
-    // pointer → intent → simulation path is connected end to end.
+    // He is parked against a wall facing left, so only a reversal can move him
+    // — and the pellets he already ate are behind him, so the score can only
+    // move if the drag really reached the simulation. That makes this the
+    // architecture's "assert the score changes" end to end: pointer → intent →
+    // simulation → HUD.
     const before = await entityFrame(page);
 
     await page.mouse.move(centreX, centreY);
@@ -189,9 +213,13 @@ test.describe('skeleton smoke', () => {
     await page.mouse.up();
 
     expect(await entityFrame(page)).not.toBe(before);
-
-    // TODO(mechanics): once pellet collection lands, tighten this to the
-    // architecture's original wording — assert the score changes.
+    await expect
+      .poll(() => readScore(page), {
+        message: 'the drag should have taken Pac-Man over fresh pellets',
+        timeout: 5000,
+        intervals: [100],
+      })
+      .toBeGreaterThan(parked);
   });
 
   /**
@@ -258,7 +286,7 @@ test.describe('skeleton smoke', () => {
     // Spec §2.2 puts SCORE / LIVES / pause in the right-hand column. Lives were
     // previously dropped altogether in landscape; they are not optional chrome.
     await expect(page.locator('[data-hud="lives"]')).toBeVisible();
-    await expect(page.locator('[data-hud="lives"]')).toHaveText('●●●');
+    await expect(page.locator('[data-hud="lives"] .status__life')).toHaveCount(3);
 
     const zone = (await page.locator('#control-zone').boundingBox())!;
     const board = (await page.locator('#board').boundingBox())!;

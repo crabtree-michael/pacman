@@ -203,10 +203,12 @@ the single most important tuning value in the control scheme.
 turns Pac-Man on the spot, with no intersection required.
 
 **Visual feedback.** The knob shows the *raw* thumb position (analogue, smooth)
-while a small chevron on the ring shows the *snapped* direction (quantised), and
-shows none while the drag sits in a dead wedge. Players can therefore see when
-they are pushing at an angle the stick will not act on. The knob ring
-tints briefly when a turn request is buffered and clears when it is consumed.
+while a small chevron on the ring shows the *latched* direction (quantised).
+Players can therefore see the angle they are actually pushing against the
+direction Pac-Man is actually taking, which is what makes a drag stuck in a dead
+wedge legible: the knob has left centre but the chevron has not followed. The
+knob ring tints briefly when a turn request is buffered and clears when it is
+consumed.
 
 **Haptics.** A 10 ms vibration on each direction change, where
 `navigator.vibrate` is available. Off by default on iOS (unsupported) and
