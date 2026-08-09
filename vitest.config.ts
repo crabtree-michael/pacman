@@ -27,7 +27,7 @@ export default defineConfig({
         test: {
           name: 'node',
           environment: 'node',
-          include: ['tests/{sim,app,input,replays,boundary}/**/*.test.ts'],
+          include: ['tests/{sim,app,input,replays,boundary,render,audio,tools}/**/*.test.ts'],
           exclude: [DOM_SPECS],
         },
       },

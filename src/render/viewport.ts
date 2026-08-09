@@ -53,6 +53,19 @@ export function computeViewport(
   };
 }
 
+export interface PrepareOptions {
+  /**
+   * Whether `drawImage` may interpolate.
+   *
+   * Off for the layers that draw paths, where it does nothing. On for the
+   * entity layer: the atlas stores frames at 4x the tile size, so a sprite is
+   * nearly always drawn smaller than its source, and bilinear downsampling is
+   * what keeps a moving character clean where nearest sampling would drop
+   * pixels and crawl (architecture §2.3).
+   */
+  smoothing?: boolean;
+}
+
 /**
  * Size a canvas's backing store to the viewport and set the transform so all
  * drawing code can work in tile units.
@@ -60,6 +73,7 @@ export function computeViewport(
 export function prepareCanvas(
   canvas: HTMLCanvasElement,
   viewport: Viewport,
+  options: PrepareOptions = {},
 ): CanvasRenderingContext2D {
   const context = canvas.getContext('2d');
   if (!context) {
@@ -80,7 +94,8 @@ export function prepareCanvas(
     viewport.originX * viewport.dpr,
     viewport.originY * viewport.dpr,
   );
-  context.imageSmoothingEnabled = false;
+  context.imageSmoothingEnabled = options.smoothing ?? false;
+  if (context.imageSmoothingEnabled) context.imageSmoothingQuality = 'high';
   return context;
 }
 

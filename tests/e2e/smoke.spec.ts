@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { startPlay } from './harness';
 
 /**
  * The one integration test the architecture asks for (§9, "Integration"):
@@ -63,6 +64,7 @@ const READY_MS = 3000;
 test.describe('skeleton smoke', () => {
   test('mounts every layer and fits them to the screen', async ({ page }) => {
     await page.goto('/');
+    await startPlay(page);
 
     await expect(page).toHaveTitle('Pac-Man');
 
@@ -79,6 +81,7 @@ test.describe('skeleton smoke', () => {
 
   test('lays the bands out in portrait and stays inside the screen', async ({ page }, testInfo) => {
     await page.goto('/');
+    await startPlay(page);
 
     const app = page.locator('#app');
     await expect(app).toHaveAttribute('data-orientation', 'portrait');
@@ -104,6 +107,7 @@ test.describe('skeleton smoke', () => {
 
   test('shows the HUD in its starting state', async ({ page }) => {
     await page.goto('/');
+    await startPlay(page);
 
     await expect(page.locator('[data-hud="score"]')).toHaveText('00');
     await expect(page.locator('[data-hud="lives"] .status__life')).toHaveCount(3);
@@ -115,6 +119,7 @@ test.describe('skeleton smoke', () => {
     page,
   }) => {
     await page.goto('/');
+    await startPlay(page);
 
     // Nothing moves during the countdown, so a frame that holds still proves
     // the renderer is drawing from state rather than repainting noise.
@@ -142,6 +147,7 @@ test.describe('skeleton smoke', () => {
 
   test('floats the joystick to the thumb and follows a drag', async ({ page }) => {
     await page.goto('/');
+    await startPlay(page);
     // The knob is moved by the render loop, not by the pointer handler, so the
     // layers must be up before any of this means anything.
     await settledFrame(page);
@@ -180,6 +186,7 @@ test.describe('skeleton smoke', () => {
 
   test('steers Pac-Man with a synthetic drag, and the score follows', async ({ page }) => {
     await page.goto('/');
+    await startPlay(page);
     await page.waitForTimeout(READY_MS + 200); // Let the countdown finish.
 
     // Pac-Man walks off to the left on his own and eats his way to the wall at
@@ -224,6 +231,7 @@ test.describe('skeleton smoke', () => {
    */
   test('pauses on the HUD button and resumes on a tap', async ({ page }) => {
     await page.goto('/');
+    await startPlay(page);
     await settledFrame(page);
 
     // Anchored on the READY! card clearing, which happens exactly when play
@@ -271,6 +279,7 @@ test.describe('skeleton smoke', () => {
 
   test('re-lays out in landscape and keeps the lives visible', async ({ page }, testInfo) => {
     await page.goto('/');
+    await startPlay(page);
     const viewport = testInfo.project.use.viewport!;
     // Rotate: swap the two dimensions and let the ResizeObserver settle.
     await page.setViewportSize({ width: viewport.height, height: viewport.width });
@@ -298,6 +307,7 @@ test.describe('skeleton smoke', () => {
 
   test('rotating back restores the portrait bands', async ({ page }, testInfo) => {
     await page.goto('/');
+    await startPlay(page);
     const viewport = testInfo.project.use.viewport!;
     const app = page.locator('#app');
 
@@ -315,6 +325,7 @@ test.describe('skeleton smoke', () => {
 
   test('pins the joystick bottom-left on a tablet-width screen', async ({ page }) => {
     await page.goto('/');
+    await startPlay(page);
     // Wider than the spec's 600 px tablet threshold, still portrait.
     await page.setViewportSize({ width: 768, height: 1024 });
 
@@ -330,6 +341,64 @@ test.describe('skeleton smoke', () => {
     expect(base.x - zone.x).toBeGreaterThanOrEqual(16);
   });
 
+  /**
+   * The autoplay rule, which is an iOS Safari problem before it is anyone
+   * else's: an `AudioContext` created outside a user gesture stays suspended
+   * for the rest of the session, and the game would be silent with no error to
+   * show for it (architecture §5.2, §10). The attract screen's tap is the
+   * gesture, so this is the test that it is being used as one.
+   */
+  test('creates the audio context on the first tap, and not before', async ({ page }) => {
+    await page.addInitScript(() => {
+      const probe = { constructed: 0, resumed: 0, state: 'none' };
+      (window as unknown as { __audio: typeof probe }).__audio = probe;
+
+      const Real = window.AudioContext;
+      window.AudioContext = class extends Real {
+        constructor() {
+          super();
+          probe.constructed++;
+          const track = (): void => {
+            probe.state = this.state;
+          };
+          track();
+          this.addEventListener('statechange', track);
+        }
+
+        override resume(): Promise<void> {
+          probe.resumed++;
+          return super.resume().then(() => {
+            probe.state = this.state;
+          });
+        }
+      };
+    });
+
+    const probe = (): Promise<{ constructed: number; resumed: number; state: string }> =>
+      page.evaluate(
+        () =>
+          (window as unknown as { __audio: { constructed: number; resumed: number; state: string } })
+            .__audio,
+      );
+
+    await page.goto('/');
+    await expect(page.locator('#app')).toHaveAttribute('data-phase', 'Attract');
+    expect(await probe(), 'audio must not be started before a gesture').toEqual({
+      constructed: 0,
+      resumed: 0,
+      state: 'none',
+    });
+
+    await page.locator('#board').click();
+
+    // Chromium hands back a context that is already running when it is created
+    // inside a user activation; WebKit hands back a suspended one and needs the
+    // `resume()` the engine calls in the same gesture. Both end up running, and
+    // it is the ending state that decides whether the game has sound.
+    await expect.poll(async () => (await probe()).state).toBe('running');
+    expect((await probe()).constructed, 'one context, created on the tap').toBe(1);
+  });
+
   test('loads without console errors', async ({ page }) => {
     const problems: string[] = [];
     page.on('console', (message) => {
@@ -338,6 +407,7 @@ test.describe('skeleton smoke', () => {
     page.on('pageerror', (error) => problems.push(String(error)));
 
     await page.goto('/');
+    await startPlay(page);
     await page.waitForTimeout(READY_MS + 500);
 
     expect(problems).toEqual([]);

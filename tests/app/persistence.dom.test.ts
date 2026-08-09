@@ -23,6 +23,7 @@ describe('settings persistence', () => {
       largeJoystick: true,
       haptics: false,
       swipe: false,
+      sound: false,
     } as const;
 
     saveSettings(settings);

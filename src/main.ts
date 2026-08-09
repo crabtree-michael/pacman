@@ -1,6 +1,9 @@
 import { Game, type GameInput, type GameView } from './app/game';
 import { applyLayout, computeLayout } from './app/layout';
-import { loadHighScore, loadSettings, saveHighScore } from './app/persistence';
+import { loadHighScore, loadSettings, saveHighScore, saveSettings } from './app/persistence';
+import { attachStats } from './app/stats';
+import { AudioDirector } from './audio/director';
+import { AudioEngine } from './audio/engine';
 import { MAZE_CLASSIC } from './data/maze-classic';
 import { InputController } from './input/controller';
 import { GamepadInput } from './input/gamepad';
@@ -9,6 +12,7 @@ import { JoystickView } from './input/joystick-view';
 import { KeyboardInput } from './input/keyboard';
 import { VirtualJoystick } from './input/joystick';
 import { SwipeInput } from './input/swipe';
+import { loadAtlas } from './render/atlas';
 import { Renderer } from './render/renderer';
 import { Direction, Phase } from './sim/types';
 import { Hud } from './ui/hud';
@@ -17,9 +21,10 @@ import './styles/main.css';
 /**
  * Bootstrap: mount the layers, wire input, open the boot gate, start the loop.
  *
- * This is the only module that touches all four subsystems. Everything below
+ * This is the only module that touches all five subsystems. Everything below
  * it stays one-directional — sim knows nothing of render, render knows nothing
- * of input — and the game's own flow lives in `sim/phases.ts`, not here.
+ * of input, audio knows nothing of anything — and the game's own flow lives in
+ * `sim/phases.ts`, not here.
  */
 
 function required<T extends Element>(selector: string): T {
@@ -34,15 +39,25 @@ const app = required<HTMLElement>('#app');
 const controlZone = required<HTMLElement>('#control-zone');
 const board = required<HTMLElement>('#board');
 const pauseButton = required<HTMLButtonElement>('[data-action="pause"]');
+const soundButton = required<HTMLButtonElement>('[data-action="sound"]');
+const bootError = required<HTMLElement>('#boot-error');
 
-const renderer = new Renderer({
-  maze: required<HTMLCanvasElement>('#layer-maze'),
-  entities: required<HTMLCanvasElement>('#layer-entities'),
-  overlay: required<HTMLCanvasElement>('#layer-overlay'),
-});
+// Read once: the renderer's motion decisions are made per level, not per frame,
+// and a player who changes the system setting mid-game gets it on reload.
+const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
-// TODO(ui): the settings screen that writes these back is unbuilt, so today
-// this only reads. Everything downstream already honours a change.
+const renderer = new Renderer(
+  {
+    maze: required<HTMLCanvasElement>('#layer-maze'),
+    entities: required<HTMLCanvasElement>('#layer-entities'),
+    overlay: required<HTMLCanvasElement>('#layer-overlay'),
+  },
+  { reducedMotion },
+);
+
+// TODO(ui): the settings screen that writes the input options back is unbuilt,
+// so today only the sound toggle round-trips. Everything downstream already
+// honours a change to any of them.
 const settings = loadSettings();
 app.dataset['handedness'] = settings.handedness;
 
@@ -61,6 +76,8 @@ const controller = new InputController()
   .use(new GamepadInput());
 
 const haptics = new Haptics(settings.haptics);
+
+const audioEngine = new AudioEngine(!settings.sound);
 
 /**
  * The controller, with haptics riding along.
@@ -84,8 +101,21 @@ const input: GameInput = {
   },
 };
 
+/**
+ * The phase, mirrored onto the app element.
+ *
+ * One attribute write per transition — a handful per level. It gives the CSS a
+ * hook for anything that needs to know what screen the game is on, and it gives
+ * the browser tests something to wait on that is not a canvas pixel diff.
+ */
+let mirroredPhase = '';
+
 const view: GameView = {
   render(previous, current, alpha) {
+    if (current.phase !== mirroredPhase) {
+      mirroredPhase = current.phase;
+      app.dataset['phase'] = current.phase;
+    }
     renderer.render(previous, current, alpha);
     // The knob is analogue and driven by the pointer, not the simulation, so it
     // syncs with the frame rather than with the tick. The ring's tint is the
@@ -95,12 +125,15 @@ const view: GameView = {
   },
 };
 
+const hud = new Hud(document);
+
 const game = new Game({
   maze: MAZE_CLASSIC,
   view,
-  chrome: new Hud(document),
+  chrome: hud,
   input,
   highScore: { load: loadHighScore, save: saveHighScore },
+  audio: new AudioDirector(audioEngine),
 });
 
 function relayout(): void {
@@ -124,19 +157,43 @@ function relayout(): void {
   });
 }
 
+function applySound(enabled: boolean): void {
+  settings.sound = enabled;
+  saveSettings(settings);
+  audioEngine.setMuted(!enabled);
+  soundButton.setAttribute('aria-pressed', String(enabled));
+  soundButton.querySelector('[data-sound-on]')?.toggleAttribute('hidden', !enabled);
+  soundButton.querySelector('[data-sound-off]')?.toggleAttribute('hidden', enabled);
+}
+
+applySound(settings.sound);
+soundButton.hidden = !AudioEngine.isSupported;
+
 pauseButton.addEventListener('click', () => {
   if (game.isPaused) game.resume();
   else game.pause();
 });
 
+soundButton.addEventListener('click', () => applySound(!settings.sound));
+
 // Tap anywhere on the board to come back from a pause, or to start a game from
-// the attract screen (product spec §2.3). The pause button is excluded: its own
-// `pointerdown` would resume the game a moment before its `click` paused it
-// again.
+// the attract screen (product spec §2.3). The HUD buttons are excluded: their
+// own `pointerdown` would resume the game a moment before their `click` paused
+// it again.
 app.addEventListener('pointerdown', (event) => {
-  if ((event.target as Element | null)?.closest('[data-action="pause"]')) return;
+  // Every tap is a gesture the audio context can be unlocked from, including
+  // the ones handled below and the ones ignored. iOS Safari will not start a
+  // context outside one, and it can suspend an already-running context after a
+  // call or an app switch (architecture §10).
+  audioEngine.unlock();
+
+  if ((event.target as Element | null)?.closest('button')) return;
   if (game.isPaused) game.resume();
   else if (game.phase === Phase.Attract) game.startGame();
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) audioEngine.resumeIfSuspended();
 });
 
 relayout();
@@ -150,23 +207,40 @@ window.addEventListener('orientationchange', () => {
 
 game.start();
 
+// `?stats` puts the frame budget on screen — the only way to check the spec's
+// §6 numbers on the handset they are written about (see `app/stats.ts`).
+if (new URLSearchParams(window.location.search).has('stats')) {
+  attachStats(game.loop, app);
+}
+
 /**
  * The boot gate (architecture §5.3): `Ready` must not start until everything it
  * draws with has resolved.
  *
- * TODO(assets): decode the sprite atlas and the audio sprite here. Nothing is
- * loaded today — the maze and characters are drawn procedurally — so the gate
- * opens on the first microtask, before the first frame is painted.
+ * Only the sprite atlas is fetched. The maze is procedural and the audio sprite
+ * is synthesised at the first gesture, so this is one request for the manifest
+ * and one for the image, both decoded before the gate opens — and therefore
+ * before a single sprite is asked for.
  */
-async function loadAssets(): Promise<void> {}
+async function loadAssets(): Promise<void> {
+  const atlas = await loadAtlas();
+  renderer.setAtlas(atlas);
+  hud.setAtlas(atlas);
+}
 
-void loadAssets().then(() => {
-  game.assetsLoaded();
-  // TODO(ui): the attract screen owns this gesture, along with the audio unlock
-  // that comes with it (product spec §2.3). Until it exists the game starts
-  // itself rather than sitting on an empty Attract phase.
-  game.startGame();
-});
+void loadAssets().then(
+  () => {
+    game.assetsLoaded();
+    // The attract screen owns the first gesture from here: it is what unlocks
+    // audio (architecture §5.2), so the game must not start itself.
+  },
+  (error: unknown) => {
+    // The gate stays shut. Nothing on the board can be drawn without the atlas,
+    // and a maze with invisible ghosts in it is worse than an honest message.
+    console.error('Asset load failed', error);
+    bootError.hidden = false;
+  },
+);
 
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
@@ -174,5 +248,6 @@ if (import.meta.hot) {
     // Tears down every registered source, the swipe surface included.
     controller.destroy();
     joystickView.destroy();
+    audioEngine.destroy();
   });
 }

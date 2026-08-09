@@ -8,7 +8,17 @@
   // to work in a browser, so nothing shipped may assume a Node API exists.
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": ["vite/client", "node"]
+    "types": ["vite/client", "node"],
+    // The asset generators are run by Node directly (`node tools/build-sprites.ts`,
+    // which type-strips rather than compiling), and Node's resolver needs the
+    // extension the bundler's does not.
+    "allowImportingTsExtensions": true
   },
-  "include": ["tests", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"]
+  "include": [
+    "tests",
+    "tools",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "playwright.config.ts"
+  ]
 }
