@@ -31,12 +31,40 @@ export interface LoopHooks {
   onResume?(): void;
 }
 
+/**
+ * How many frames of timings to keep.
+ *
+ * Four seconds at 60 Hz — long enough for a percentile to mean something,
+ * short enough that a stall two minutes ago is not still being reported.
+ */
+const SAMPLE_WINDOW = 240;
+
+/** What one frame cost, and what the display gave it (product spec §6). */
+export interface FrameStats {
+  /** Frames measured since the loop started. */
+  frames: number;
+  /** Milliseconds of simulation plus render, per frame. */
+  work: readonly number[];
+  /** Milliseconds between consecutive frames — the display's own pace. */
+  intervals: readonly number[];
+}
+
+/** Append to a fixed-length ring, oldest out. */
+function push(samples: number[], value: number): void {
+  samples.push(value);
+  if (samples.length > SAMPLE_WINDOW) samples.shift();
+}
+
 export class GameLoop {
   private rafId: number | null = null;
   private lastMs = 0;
   private accumulator = 0;
   /** Whether the *tab* stopped this loop, as opposed to the app. */
   private suspended = false;
+
+  private frames = 0;
+  private readonly work: number[] = [];
+  private readonly intervals: number[] = [];
 
   constructor(private readonly hooks: LoopHooks) {
     document.addEventListener('visibilitychange', this.onVisibilityChange);
@@ -51,6 +79,9 @@ export class GameLoop {
     if (this.rafId !== null) return;
     this.lastMs = performance.now();
     this.accumulator = 0;
+    // A resumed loop's first interval spans however long the tab was away, and
+    // reporting that as a dropped frame would be a lie about the game's pace.
+    this.clearStats();
     this.rafId = requestAnimationFrame(this.frame);
   }
 
@@ -66,19 +97,40 @@ export class GameLoop {
     this.stop();
   }
 
+  /**
+   * The last few frames' timings (product spec §6).
+   *
+   * Two `performance.now()` calls a frame, always on, because a frame budget
+   * nobody can read is a frame budget nobody checks. `app/stats.ts` puts it on
+   * screen behind `?stats`, and the browser tests assert against it.
+   */
+  get stats(): FrameStats {
+    return { frames: this.frames, work: this.work, intervals: this.intervals };
+  }
+
   private readonly frame = (nowMs: number): void => {
     this.rafId = requestAnimationFrame(this.frame);
 
     const delta = Math.min(nowMs - this.lastMs, MAX_FRAME_MS);
+    const interval = nowMs - this.lastMs;
     this.lastMs = nowMs;
     this.accumulator += delta;
 
+    const started = performance.now();
     while (this.accumulator >= STEP_MS) {
       this.hooks.step(STEP_MS);
       this.accumulator -= STEP_MS;
     }
 
     this.hooks.render(this.accumulator / STEP_MS);
+
+    // The first frame has no predecessor to be an interval from, and its work
+    // includes whatever the browser was still doing at start-up.
+    if (this.frames > 0) {
+      push(this.work, performance.now() - started);
+      push(this.intervals, interval);
+    }
+    this.frames++;
   };
 
   /**
@@ -89,6 +141,13 @@ export class GameLoop {
    * deliberately — or one that has not been started yet — must not spring to
    * life because the player switched tabs and back.
    */
+  /** Reset the timing window — used when the loop restarts after a suspend. */
+  private clearStats(): void {
+    this.frames = 0;
+    this.work.length = 0;
+    this.intervals.length = 0;
+  }
+
   private readonly onVisibilityChange = (): void => {
     if (document.hidden) {
       if (this.rafId === null) return;

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { startPlay } from './harness';
 
 /**
  * The joystick half of the responsiveness sweep (product spec §3, §5).
@@ -76,6 +77,11 @@ async function settled(page: Page): Promise<void> {
       { message: 'the layout never stopped moving — did the resize loop settle?' },
     )
     .toBe(true);
+
+  // Every one of these tests wants a live board: the stick's own feedback is
+  // DOM, but the tint and the steering it is checked against are the
+  // simulation's. Play starts behind the boot gate and the attract tap.
+  await startPlay(page);
 }
 
 /**

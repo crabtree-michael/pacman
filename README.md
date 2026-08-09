@@ -3,12 +3,12 @@
 A mobile-first, touch-controlled Pac-Man for the browser. No install, no
 account, no backend.
 
-The game is playable, and the ghosts hunt: eat the maze, chase the score, lose
-your three lives to Blinky, Pinky, Inky and Clyde. Build tooling, the fixed-step
-simulation, the game-flow state machine, the layered renderer, the touch input
-pipeline and the responsive layout are all in place, with the test harness
-around them. What is left is chrome rather than mechanics — see
-[Status](#status).
+The game is playable, it looks like Pac-Man and it sounds like Pac-Man: eat the
+maze, chase the score, lose your three lives to Blinky, Pinky, Inky and Clyde.
+Build tooling, the fixed-step simulation, the game-flow state machine, the
+layered renderer, the touch input pipeline, the sprite atlas, the audio director
+and the responsive layout are all in place, with the test harness around them.
+What is left is the menus and the PWA wrapper — see [Status](#status).
 
 ## Design documents
 
@@ -37,6 +37,7 @@ npm run check        # typecheck, unit tests, build, browser tests
 | ---------------------- | ------------------------------------------------ |
 | `npm run dev`          | Vite dev server with hot module replacement      |
 | `npm run build`        | Typecheck, then build to `dist/`                 |
+| `npm run build:assets` | Regenerate the sprite atlas into `public/assets/`|
 | `npm run preview`      | Serve the production build on `:4173`            |
 | `npm run typecheck`    | Typecheck the app and the tests                  |
 | `npm test`             | Vitest once                                      |
@@ -70,20 +71,36 @@ loading, and the absence of HMR are exactly what the dev server hides. Both
 ports are `strictPort`, so a busy port fails loudly instead of quietly moving
 the URL you bookmarked on your phone.
 
+Add `?stats` to the URL for a frame-budget readout — frames per second, the
+median and 95th-percentile milliseconds the game spends per frame on simulation
+plus rendering, and the share of frames inside the product spec's 8 ms target.
+The browser tests assert against the same numbers, but emulation is not a
+handset: §6's floor is written about a four-year-old mid-tier Android, and this
+is how you check it on one.
+
 Note that HTTPS-only APIs — service worker, Vibration, Wake Lock — will not
-work over plain `http://` to a LAN address. Nothing in the skeleton needs them
-yet; the PWA ticket will need a tunnel or a local certificate.
+work over plain `http://` to a LAN address. Nothing shipped needs them yet; the
+PWA ticket will need a tunnel or a local certificate.
 
 ## Structure
 
 ```
+public/assets/
+  sprites.png sprites.json  The generated atlas and its frame map
+tools/
+  build-sprites.ts          Writes the atlas; `npm run build:assets`
+  atlas.ts                  Packs and renders it — the half with no filesystem
+  sprite-art.ts             The art: every frame, as shapes in tile units
+  raster.ts                 Supersampling rasterizer for those shapes
+  png.ts                    A dependency-free PNG encoder
 src/
-  main.ts                   Bootstrap: mount layers, wire input, open the gate
+  main.ts                   Bootstrap: load assets, mount layers, wire input
   app/
     game.ts                 Loop <-> simulation seam; pause, restart, boot gate
-    loop.ts                 Fixed-timestep driver, visibility handling
+    loop.ts                 Fixed-timestep driver, visibility handling, timings
     layout.ts               Viewport band maths (product spec §2)
-    persistence.ts          localStorage: high score, input settings
+    persistence.ts          localStorage: high score, settings
+    stats.ts                The `?stats` frame-budget readout
   sim/                      Pure, DOM-free (architecture §3)
     step.ts                 One tick: step(state, input, dt) -> state
     phases.ts               Game flow: transition table + per-phase handlers
@@ -104,10 +121,16 @@ src/
   render/
     renderer.ts             Owns the three layers and the shared viewport
     viewport.ts             Tile<->pixel transforms, DPR handling
-    maze-layer.ts           Procedural maze, redrawn per level
+    maze-layer.ts           Procedural maze outlines, redrawn per level
     entity-layer.ts         Pellets, fruit and actors, per frame, interpolated
     overlay-layer.ts        The card for the current phase, redrawn on change
-    palette.ts              The fruit colours the board and the HUD share
+    atlas.ts                Frame lookup, sprite and bitmap-glyph drawing
+    palette.ts              Fruit colours and the per-level maze palettes
+  audio/
+    synth.ts                The audio sprite: one buffer, one offset map
+    cues.ts                 Every sound the game makes, as note data
+    engine.ts               Context, unlock, playback, mute, loop cross-fades
+    director.ts             Events and state in, cues out
   input/
     controller.ts           Arbitration and latching
     joystick.ts             Dead zones, 4-way snapping, latching (no DOM)
@@ -123,11 +146,14 @@ tests/
   sim/                      Movement, the phase machine, the PRNG — headless
   app/                      Layout and viewport snapshots
   input/                    Joystick maths, synthetic pointer sequences
+  render/                   The atlas contract, the maze outline geometry
+  audio/                    Cue synthesis, the director, the engine's wiring
+  tools/                    The PNG encoder; the atlas against the checked-in one
   replays/                  Replay driver, digest, recorded streams
   boundary/                 The sim/ isolation rule, enforced
   dom/                      jsdom: the HUD, the loop, the app wiring
-  e2e/                      Playwright: mobile emulation smoke test and the
-                            size/orientation matrix
+  e2e/                      Playwright: mobile emulation smoke test, the
+                            size/orientation matrix, and the frame budget
 ```
 
 Five invariants hold this together, and each has a cost to give up:
@@ -146,6 +172,11 @@ Five invariants hold this together, and each has a cost to give up:
 - **Input is intent, not action.** Pointer handlers only store a raw position.
   Snapping and both dead zones run once per tick, and the result is a
   direction *request* the simulation applies when it becomes legal.
+- **Assets are generated, checked in, and verified against their source.** The
+  sprite atlas is built by `tools/` from shape definitions, so a build needs no
+  asset step and a review sees a readable diff — and a test rebuilds it and
+  compares it byte for byte, so art edited without `npm run build:assets` fails
+  rather than silently shipping the old sprites.
 - **Game flow is a table, not a tangle.** Every screen the game can be on is a
   `phase`, and the only way between two of them is an entry in the transition
   table in `sim/phases.ts`. Nothing outside that module assigns `state.phase`;
@@ -178,11 +209,14 @@ should own that second gesture are `TODO(ui)`.
 | `tests/sim`          | Vitest, Node             | Turn legality, wall stops, turn-buffer expiry, tunnel wrap, the phase machine, the PRNG, pellet collection and the chew stall, the frightened timer and the ghost ladder, ghost contact and the death path, fruit thresholds and expiry, the per-level tuning table, the ghost decision rule and its tie-break, the four targeting rules, scatter/chase scheduling and its reversals, house release and the eyes' journey home |
 | `tests/app`          | Vitest, Node             | Layout bands and viewport fitting, snapshotted over a device matrix  |
 | `tests/input`        | Vitest, Node             | Dead zones, snapping, latching, arbitration, static placement, gamepad, haptics |
+| `tests/render`       | Vitest, Node             | Every frame name the renderer can ask for, against the atlas that ships; the chomp and death cursors; the wall outline's geometry, on a recording context |
+| `tests/audio`        | Vitest, Node             | Cue synthesis and the sprite's offset map; events to cues; siren tiers and loop precedence; the engine's unlock, cross-fade and mute rules, against a fake Web Audio graph |
+| `tests/tools`        | Vitest, Node             | The PNG encoder, decoded and compared back; the atlas rebuilt and diffed against the one checked in |
 | `tests/replays`      | Vitest, Node             | A scripted input stream run headless, hashed to one digest           |
 | `tests/boundary`     | Vitest, Node             | The `sim/` isolation rule                                            |
 | `tests/dom`          | Vitest, jsdom            | The HUD; the loop, on a fake clock; the app's pause and boot wiring   |
 | `*.dom.test.ts`      | Vitest, jsdom            | The DOM half of a layer, alongside its headless half (swipe, settings storage) |
-| `tests/e2e`          | Playwright, WebKit + Chromium | Mounting, the render loop, pointer-driven steering, pause and resume, rotation, a nine-size layout matrix, and the same nine sizes swept for joystick reach and feedback |
+| `tests/e2e`          | Playwright, WebKit + Chromium | Mounting, the render loop, pointer-driven steering, pause and resume, rotation, the audio unlock, a nine-size layout matrix, the same nine sizes swept for joystick reach and feedback, and the frame budget at three of them |
 
 Three things about this setup are deliberate.
 
@@ -251,7 +285,7 @@ the frightened timer with the 200/400/800/1600 ghost ladder, the bonus fruit at
 respawn that keeps the board as it was left, and level progression driven by a
 per-level tuning table that clamps at 21 and runs for ever. Contact with a ghost
 costs a life; contact with a frightened one scores. The status strip shows lives
-as Pac-Man wedges and the levels reached as their fruit.
+as Pac-Man and the levels reached as their fruit.
 
 The ghosts are complete to spec §4.3. All four run one movement engine — at each
 tile centre, take the exit that minimises straight-line distance to a target
@@ -272,8 +306,27 @@ and gamepad sharing the same intent pipeline; haptics; and the handedness and
 large-stick accessibility options. The stick pins to a corner at tablet widths
 (§2.1) and mirrors for a right-handed player (§3.4).
 
+The art and the sound are in, to architecture §5. Pac-Man, the ghosts, their
+eyes, the frightened and flashing frames, eleven frames of dying, eight fruit
+and a 5x7 bitmap font come from one 19.7 kB sprite atlas, generated at build
+time from shape definitions in `tools/sprite-art.ts` and decoded through
+`createImageBitmap` behind the boot gate. The maze stays procedural and is now
+the arcade's rounded double-line outlines with a palette per level, flashing
+white when a board is cleared — or holding a static tint under
+`prefers-reduced-motion`. Power pellets blink, the score bubble fills the
+one-second freeze over an eaten ghost, and the overlay cards are drawn from the
+atlas's glyphs rather than a system font.
+
+Audio is a single synthesised sprite buffer with an offset map: chomp, power
+pellet, ghost, fruit, extra life, death and two lengths of intro jingle, over a
+siren that rises in five tiers as the board empties and cross-fades to the
+frightened warble and to the eyes on their way home. The context is created and
+resumed on the attract screen's tap, re-checked on every `visibilitychange`, and
+muted by a gain node from the HUD's toggle — which is the one setting that
+round-trips to `localStorage` today.
+
 The settings *screen* is not built — it is `TODO(ui)` with the rest of the menus.
-The options above are read from `localStorage` and honoured at boot, so that
+The input options are read from `localStorage` and honoured at boot, so that
 screen only has to call `saveSettings`; until it exists they ship at their
 defaults and can only be changed by hand.
 
@@ -282,22 +335,17 @@ Not built yet, each marked with a `TODO(area)` comment where it belongs:
 - `TODO(mechanics)` — cornering, the one movement rule left. `CORNER_TOLERANCE`
   is still 0, so turns are taken exactly on the tile centre; the diagonal
   shortcut wants playtesting alongside open question 2 rather than a guess.
-- `TODO(render)` — the sprite atlas, arcade wall shapes, bitmap glyphs, the
-  level-complete maze flash and the score bubble over an eaten ghost. The
-  one-second freeze that bubble is meant to fill already runs; nothing is drawn
-  in it yet.
-- `TODO(audio)` — the audio sprite and the event-driven director. The event
-  queue it consumes is already drained once per tick in `app/game.ts`.
-- `TODO(ui)` — the attract screen, the pause overlay's Resume/Restart/Sound
-  controls, game over and intermission screens. The phases behind them all
-  exist and are reachable; what is missing is the chrome.
-- `TODO(assets)` — the boot gate in `main.ts` resolves immediately because
-  nothing is loaded yet
+- `TODO(ui)` — the attract screen's demo of the maze behind the title, the pause
+  overlay's Resume/Restart controls, and the settings, game over and
+  intermission screens. The phases behind them all exist and are reachable, and
+  the attract screen now holds the game until the player taps; what is missing
+  is the chrome.
 
 The test harness is in place — see [Testing](#testing). Still outstanding from
 the architecture doc: the PWA service worker and manifest (§8.2, build order
-step 9), the CI bundle-size gate (§7 — the budget is 120 kB gzipped and the
-bundle is currently 12.8 kB, so nothing enforces it yet), and ESLint, which is
+step 9), which is the deployment ticket's, and the CI bundle-size gate (§7 — the
+budget is 120 kB of JS gzipped and 250 kB of initial payload; the build is
+currently 16.8 kB and 39 kB, so nothing enforces it yet), and ESLint, which is
 blocked on TypeScript 7 support.
 
 The architecture's §9 rows for scoring, progression and ghost AI are covered;
@@ -379,7 +427,9 @@ noted as still manual.
   pipeline; a flick under the 24 px threshold does not, and swiping the maze
   never scrolls the page
 - Viewport caps DPR at 3 and snaps the tile size to whole device pixels
-- Production bundle is 12.8 kB gzipped, against the architecture's 120 kB budget
+- Production bundle is 16.8 kB of JavaScript gzipped against the architecture's
+  120 kB budget, and 39 kB of initial payload — the JS, the CSS, the document,
+  the frame map and the 19.7 kB atlas — against the product spec's 250 kB
   *(manual — the CI gate from architecture §7 is not built)*
 - The page mounts, fits and runs its loop on Android and iOS emulation, and a
   synthetic drag on the joystick steers Pac-Man, with no console errors
@@ -388,6 +438,98 @@ noted as still manual.
   overflows the viewport, and the document never scrolls
 - Rotating to landscape and back re-fits the board rather than leaving it at its
   previous size
+- Every frame name the renderer can ask for exists in the atlas that ships, no
+  frame falls outside the image, and each glyph sits inside the strip the
+  runtime tint copies
+- The atlas rebuilt from its art definitions is byte-identical to the file
+  checked in, and to itself built twice — so art edited without a rebuild fails
+  a test rather than shipping stale
+- The PNG encoder's output decodes back to the pixels it was given, whichever
+  filter each scanline chose, and flat art costs under a fiftieth of its raw
+  size
+- No wall stroke ever crosses a corridor, a tile buried inside a block draws
+  nothing, and the border ring carries a line on each face
+- Every cue starts and ends at silence and peaks below clipping, the sprite's
+  slices do not overlap, and the death cue is identical on every play
+- Audio does not exist until the player taps: no `AudioContext` is constructed
+  before the gesture, exactly one is after it, and it reaches `running` on both
+  engines — Chromium hands one back already running, WebKit needs the `resume()`
+  the engine makes in the same gesture
+- The siren is restated every tick and restarted never; a loop change
+  cross-fades and stops the old voice; muting moves a gain and still plays the
+  cue, so nothing about the game's timing can depend on the sound being on
+- Frame budget on emulation, over four seconds of live play at 320x568, 390x844
+  and 1024x1366, both engines: median work 0.1-0.2 ms and p95 at or under 2 ms
+  against the spec's 8 ms target, with 99-100% of frames inside it — measured
+  through a death and respawn as well as ordinary play
+- Touch to visible change: p95 0.9 frames on Chromium (15 ms at 60 fps) and 1.8
+  frames on WebKit, against the spec's two-frame budget
+
+### Departed: the atlas ships as a PNG, and there is no WebP
+
+Architecture §5.1 asks for "one WebP (with PNG fallback via `<picture>`-style
+feature detection)". The atlas ships as a PNG alone.
+
+The reason is that the fallback is already inside the budget the WebP was
+written for. §5.1 estimates the atlas at 20 kB; the PNG is 19.7 kB, because the
+art is flat colour with antialiased edges and that is what PNG's scanline
+filters plus deflate are best at. A lossless WebP of the same image would save a
+few kilobytes at the cost of a second encoder in the build, a second file in the
+repository, and a feature-detection branch on the boot path — for a saving
+smaller than one of today's HTTP responses. Every supported browser decodes both
+formats, so the branch would never be exercised.
+
+The generator is `tools/`, and it has no dependencies: a supersampling
+rasterizer for the shapes, and a PNG encoder over `node:zlib`. That was not
+originally the point — nothing on npm encodes a PNG without either a native
+module or a decoder, a resizer and a colour-management stack riding along — but
+it is the reason the atlas is reproducible: `npm run build:assets` is
+deterministic, and `tests/tools` rebuilds it and compares it byte for byte with
+the file that is checked in.
+
+The art is original, which product spec open question 5 asks for. It is shapes
+in tile units in `tools/sprite-art.ts` rather than a pixel grid, so a re-skin is
+an edit and a rebuild.
+
+### Departed: the audio sprite is synthesised, not fetched
+
+Architecture §5.2 asks for a single audio sprite file — every cue concatenated,
+one JSON offset map, `.webm/opus` with an `.m4a/aac` fallback, 60 kB — played
+back through `AudioBufferSourceNode`. Everything in that sentence ships except
+the file.
+
+`audio/synth.ts` builds the same sprite at runtime: one `AudioBuffer` holding
+every cue end to end, one offset map, and playback as
+`start(0, offset, duration)`. What changes is where the samples come from. The
+cues are square and triangle waves with pitch sweeps — the arcade's sound chip
+had nothing else — so the *recipe* for them is about two kilobytes of data in
+`audio/cues.ts` against sixty for an encoded file. It also removes the
+format-support matrix, removes the decode from the boot path, and removes the
+one thing an encoded asset would have added that the recipe cannot: a
+dependency on an audio encoder in the toolchain.
+
+The seam is deliberate. `AudioEngine` consumes a PCM buffer and an offset map;
+where they came from is `synth.ts`'s business alone. Swapping in a fetched file
+later is a change to one module and no change at all to the engine, the
+director, or the cue names.
+
+Worth a spec owner's eye, since §5.2 is specific about the format. The
+requirements behind it — one decode, no runtime requests during play,
+sample-accurate overlap, mute as a gain — are all met or bettered.
+
+### Chosen: the HUD keeps its DOM text and takes the atlas's pictures
+
+§5.1 puts the HUD on the bitmap glyph strip. The strip exists and the canvas
+overlay cards use it, but the HUD's score and high score stay DOM text, because
+the argument the architecture makes for a DOM HUD in §1 — crisp at any density,
+readable by assistive technology, no canvas fill-rate — is an argument against
+painting it as pixels. Text a screen reader can announce is worth more here than
+a font that matches the cabinet.
+
+The two rows that are *pictures* did move: lives and the level fruit are frames
+from the atlas, shown as CSS background sprites positioned by ratio, so they
+scale with the type size and need no second copy of the art. The CSS shapes they
+replace are still there as the fallback while the atlas is decoding.
 
 ### Settled: the sizing rule beats the worked examples
 

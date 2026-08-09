@@ -25,7 +25,17 @@
           <span class="hud__label">High</span>
           <span class="hud__value" data-hud="high-score">00</span>
         </div>
-        <button class="hud__pause" type="button" data-action="pause" aria-label="Pause">
+        <button
+          class="hud__button"
+          type="button"
+          data-action="sound"
+          aria-label="Sound"
+          aria-pressed="true"
+        >
+          <span data-sound-on>&#128266;</span>
+          <span data-sound-off hidden>&#128263;</span>
+        </button>
+        <button class="hud__button" type="button" data-action="pause" aria-label="Pause">
           &#9208;
         </button>
       </header>
@@ -60,6 +70,12 @@
       </footer>
 
       <p class="too-small">Screen too small to play — try a wider window.</p>
+
+      <!-- Shown only if the sprite atlas cannot be fetched. The game draws its
+           characters from it, so there is nothing to fall back to. -->
+      <p class="load-error" id="boot-error" hidden role="alert">
+        Could not load the game's artwork. Check your connection and reload.
+      </p>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

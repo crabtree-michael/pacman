@@ -53,6 +53,14 @@ export interface Settings {
   haptics: boolean;
   /** Swipe-to-steer on the maze (product spec §3.3). */
   swipe: boolean;
+  /**
+   * Sound on or off (product spec §4.7).
+   *
+   * On by default, which costs nothing: the audio context stays locked until
+   * the player's first tap either way, so nothing can play before they have
+   * asked for the game to start.
+   */
+  sound: boolean;
 }
 
 export const DEFAULT_SETTINGS: Readonly<Settings> = {
@@ -60,6 +68,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   largeJoystick: false,
   haptics: true,
   swipe: true,
+  sound: true,
 };
 
 function readBoolean(
@@ -96,6 +105,7 @@ export function loadSettings(): Settings {
     largeJoystick: readBoolean(source, 'largeJoystick', DEFAULT_SETTINGS.largeJoystick),
     haptics: readBoolean(source, 'haptics', DEFAULT_SETTINGS.haptics),
     swipe: readBoolean(source, 'swipe', DEFAULT_SETTINGS.swipe),
+    sound: readBoolean(source, 'sound', DEFAULT_SETTINGS.sound),
   };
 }
 
