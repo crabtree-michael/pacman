@@ -8,7 +8,20 @@
 export const HUD_HEIGHT = 48;
 export const STATUS_HEIGHT = 36;
 export const CONTROL_ZONE_MIN = 180;
-/** Past this the maze stops growing and the surplus goes to the thumb rest. */
+/**
+ * Ceiling for the thumb band in portrait.
+ *
+ * The band used to absorb every pixel of surplus height, which on a tall phone
+ * left 330-370 px of empty black at the bottom with the ring floating in the
+ * middle of it — the stick read as stuck halfway up the screen rather than as a
+ * control docked at the bottom. Past this height the surplus goes back to the
+ * stage, where it becomes symmetric breathing room around a centred board.
+ *
+ * 240 px = the largest ring the scale rule can produce (128 x 1.25 = 160) plus
+ * its 24 px inset above and below, plus slack so the band still reads as a rest.
+ */
+export const CONTROL_ZONE_MAX = 240;
+/** Past this the maze stops growing (product spec §2.1). */
 export const MAZE_MAX_WIDTH = 520;
 /** Below this width the game is unplayable and says so instead of rendering. */
 export const MIN_SUPPORTED_WIDTH = 320;
@@ -91,9 +104,19 @@ export function computeLayout(
     mazeHeight: height,
     hudHeight: HUD_HEIGHT,
     statusHeight: STATUS_HEIGHT,
-    controlZone: Math.max(
-      CONTROL_ZONE_MIN,
-      availableHeight - HUD_HEIGHT - STATUS_HEIGHT - height,
+    /*
+     * The band takes the height the maze did not want, up to its ceiling. What
+     * is left over after that lands in the stage, which centres the board in it
+     * — so the surplus shows up as equal margins above and below the maze
+     * rather than as a cavern under it.
+     *
+     * Nothing is taken from the maze to pay for this: there is only ever a
+     * surplus when the maze is capped by width (or by MAZE_MAX_WIDTH), because
+     * a height-capped maze has already eaten the lot.
+     */
+    controlZone: Math.min(
+      CONTROL_ZONE_MAX,
+      Math.max(CONTROL_ZONE_MIN, availableHeight - HUD_HEIGHT - STATUS_HEIGHT - height),
     ),
   };
 }

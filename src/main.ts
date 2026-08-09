@@ -103,15 +103,41 @@ const game = new Game({
   highScore: { load: loadHighScore, save: saveHighScore },
 });
 
+/**
+ * The space the bands actually get: the app box's *content* size.
+ *
+ * `clientWidth`/`clientHeight` include padding, and the app's padding is the
+ * safe-area inset — 80-odd px of notch and home indicator on a modern handset.
+ * Handing that to the band maths sized the maze for a screen taller than the
+ * one its children were laid out in, so every band came out too big and the
+ * bottom of the control zone was pushed off the screen by exactly the inset.
+ * The insets are zero in a desktop browser and under Playwright's emulation,
+ * which is why this only ever showed up on a real phone.
+ */
+function availableSize(): { width: number; height: number } {
+  const style = getComputedStyle(app);
+  const padding = (side: string): number =>
+    Number.parseFloat(style.getPropertyValue(`padding-${side}`)) || 0;
+
+  return {
+    width: Math.max(0, (app.clientWidth || window.innerWidth) - padding('left') - padding('right')),
+    height: Math.max(
+      0,
+      (app.clientHeight || window.innerHeight) - padding('top') - padding('bottom'),
+    ),
+  };
+}
+
 function relayout(): void {
   // Measured on the app box, not the stage: the band maths subtracts the HUD,
   // status strip and control zone from the *whole* available height. Measuring
   // the stage would both double-count and create a feedback loop, since the
   // stage's size is an output of this calculation.
   const state = game.state;
+  const available = availableSize();
   const metrics = computeLayout(
-    app.clientWidth || window.innerWidth,
-    app.clientHeight || window.innerHeight,
+    available.width,
+    available.height,
     state.maze.data.cols,
     state.maze.data.rows,
   );

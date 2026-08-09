@@ -384,8 +384,13 @@ noted as still manual.
 - The page mounts, fits and runs its loop on Android and iOS emulation, and a
   synthetic drag on the joystick steers Pac-Man, with no console errors
 - Nine sizes spanning the spec's 320x568–1024x1366 support range, in both
-  orientations and on both engines: the maze layer is actually painted, nothing
-  overflows the viewport, and the document never scrolls
+  orientations and on both engines: the maze layer is actually painted, the
+  board is centred in its band both ways, nothing overflows the viewport, and
+  the document never scrolls
+- The stick rests against the bottom of the control zone, its own inset clear of
+  the edge and no further, at every portrait size in that range
+- With a notch and a home indicator simulated, the bands fit inside the insets
+  and the board still fits the band it was given
 - Rotating to landscape and back re-fits the board rather than leaving it at its
   previous size
 
@@ -396,9 +401,39 @@ gets all the height left over above the 180 px control-zone minimum. That rule
 disagreed with the control-zone column of the same section's worked-example
 table, which implied a per-device reservation the rule never mentions. The spec
 owner has ruled the written rule authoritative, so the table has been corrected
-to the figures the rule produces (control zones of 180/328/372/364 px, and a
-340x376 maze on 360x640). `CONTROL_ZONE_MIN` stays at 180 and the code is
-unchanged.
+to the figures the rule produces (a 340x376 maze on 360x640, and control zones
+at the minimum wherever the maze is height-capped). `CONTROL_ZONE_MIN` stays at
+180 and the maze maths is unchanged.
+
+### Changed: the thumb band has a ceiling, and the stick sits at the bottom of it
+
+Giving the control zone *all* the surplus height, which is what that rule
+produced, made it 328–372 px of empty black on a tall phone — and the stick, set
+to centre itself in whatever band it was handed, ended up floating halfway up
+the screen rather than under the thumb. Two changes, neither of which touches
+how big the maze gets:
+
+- `CONTROL_ZONE_MAX = 240` caps the band at the largest ring the §3.1 scale rule
+  can produce (160 px) plus its 24 px inset above and below, plus slack. The
+  surplus past that stays in the maze band, where the board is centred in it —
+  so it reads as equal margins around the maze instead of a cavern under it.
+- In portrait the stick docks against the *bottom* of the band. The band's
+  height varies with the screen; its bottom edge does not, so that is the one
+  anchor that lands in the same place on every device. The tablet flag now only
+  chooses the horizontal half of the placement; landscape still centres in the
+  gutter, which is already a thumb-width column.
+
+### Fixed: the bands were sized against the safe-area insets
+
+The band maths was handed the app element's `clientHeight`, which includes
+padding — and the app's padding *is* the safe-area inset. On a notched phone
+that is 80-odd px of notch and home indicator the flex children never get, so
+every band came out sized for a taller screen than it was in and the maze
+overflowed its own band. `env(safe-area-inset-*)` is zero in every desktop
+engine, Playwright's device emulation included, which is why nothing caught it:
+`relayout()` now measures the app's *content* box, and the e2e sweep drives the
+custom properties the stylesheet reads the insets into so a notch can be
+simulated.
 
 ### Departed: the joystick scales off the screen's short edge
 

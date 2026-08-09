@@ -32,7 +32,7 @@ const SCALE_MAX = 1.25;
  */
 const SCALE_FIT_FLOOR = 0.6;
 
-/** Corner inset for the tablet resting position; clears the 16 px of spec §2.4. */
+/** Inset from the edges the stick rests against; clears the 16 px of spec §2.4. */
 export const JOYSTICK_INSET_PX = 24;
 
 const DIRECTION_NAMES: Readonly<Record<Direction, string>> = {
@@ -73,20 +73,28 @@ export interface ZoneSize {
  */
 export function restPosition(zone: ZoneSize, baseSize: number, placement: JoystickPlacement): Vec2 {
   const half = baseSize / 2;
-  const centre = { x: zone.width / 2, y: zone.height / 2 };
+  const inset = JOYSTICK_INSET_PX + half;
 
-  // Only portrait tablets corner the stick. In landscape the gutter is already
-  // a thumb-width column, so the middle of it is the reachable spot.
-  if (!placement.tablet || placement.orientation !== 'portrait') {
-    return clampInto(centre, zone, half);
+  // Landscape: the gutter is already a thumb-width column running the height of
+  // the screen, so the middle of it is the reachable spot and there is no
+  // "bottom" to dock against that a thumb would thank you for.
+  if (placement.orientation === 'landscape') {
+    return clampInto({ x: zone.width / 2, y: zone.height / 2 }, zone, half);
   }
 
-  const inset = JOYSTICK_INSET_PX + half;
+  // Portrait: the stick docks against the bottom of the band. Centring it there
+  // put it in the middle of whatever height the band happened to get, which on
+  // a tall phone is most of the way up the screen — a long way from where the
+  // thumb rests. The band's height varies with the screen; its bottom edge does
+  // not, so the bottom is the one anchor that lands in the same place on every
+  // device.
+  //
+  // The tablet flag now only decides the horizontal half of it: a screen wider
+  // than a thumb arc pulls the stick into the near corner instead of leaving it
+  // out in the middle where neither hand reaches (product spec §2.1).
+  const cornered = placement.handedness === 'right' ? zone.width - inset : inset;
   return clampInto(
-    {
-      x: placement.handedness === 'right' ? zone.width - inset : inset,
-      y: zone.height - inset,
-    },
+    { x: placement.tablet ? cornered : zone.width / 2, y: zone.height - inset },
     zone,
     half,
   );
