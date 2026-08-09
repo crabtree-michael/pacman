@@ -47,9 +47,10 @@ npm run check        # typecheck, unit tests, build, browser tests
 | `npm run setup:e2e`    | Install the Playwright browsers                  |
 | `npm run check`        | Everything above, in the order CI would run them |
 
-Arrow keys or WASD work on desktop; on a touchscreen you get the virtual
-joystick, or a swipe anywhere on the maze. A gamepad D-pad works if one is
-plugged in.
+Arrow keys or WASD work on desktop, and so does the mouse: rest the cursor on
+the joystick and it steers, no button held. On a touchscreen you get the same
+stick under a thumb, or a swipe anywhere on the maze. A gamepad D-pad works if
+one is plugged in. Whatever is steering, the stick on screen shows it.
 
 ### On a phone
 
@@ -134,9 +135,9 @@ src/
   input/
     controller.ts           Arbitration and latching
     joystick.ts             Dead zones, 4-way snapping, the decide window (no DOM)
-    joystick-view.ts        Pointer handlers, placement, CSS transforms
+    joystick-view.ts        Pointer and hover handlers, placement, CSS transforms
     swipe.ts                Flick-to-steer on the maze
-    keyboard.ts             Desktop convenience
+    keyboard.ts             Arrow keys and WASD, and what is held, for the stick to draw
     gamepad.ts              D-pad and left stick, polled once a tick
     haptics.ts              A 10 ms pulse on each direction change
   ui/hud.ts                 Score, high score, lives, level fruit (DOM)
@@ -208,15 +209,15 @@ should own that second gesture are `TODO(ui)`.
 | -------------------- | ------------------------ | ------------------------------------------------------------------- |
 | `tests/sim`          | Vitest, Node             | Turn legality, wall stops, turn-buffer expiry, tunnel wrap, the phase machine, the PRNG, pellet collection and the chew stall, the frightened timer and the ghost ladder, ghost contact and the death path, fruit thresholds and expiry, the per-level tuning table, the ghost decision rule and its tie-break, the four targeting rules, scatter/chase scheduling and its reversals, house release and the eyes' journey home |
 | `tests/app`          | Vitest, Node             | Layout bands and viewport fitting, snapshotted over a device matrix  |
-| `tests/input`        | Vitest, Node             | Dead zones, snapping, latching, arbitration, static placement, gamepad, haptics |
+| `tests/input`        | Vitest, Node             | Dead zones, snapping, latching, arbitration, static placement, the cursor's hover area, gamepad, haptics |
 | `tests/render`       | Vitest, Node             | Every frame name the renderer can ask for, against the atlas that ships; the chomp and death cursors; the wall outline's geometry, on a recording context |
 | `tests/audio`        | Vitest, Node             | Cue synthesis and the sprite's offset map; events to cues; siren tiers and loop precedence; the engine's unlock, cross-fade and mute rules, against a fake Web Audio graph |
 | `tests/tools`        | Vitest, Node             | The PNG encoder, decoded and compared back; the atlas rebuilt and diffed against the one checked in |
 | `tests/replays`      | Vitest, Node             | A scripted input stream run headless, hashed to one digest           |
 | `tests/boundary`     | Vitest, Node             | The `sim/` isolation rule                                            |
 | `tests/dom`          | Vitest, jsdom            | The HUD; the loop, on a fake clock; the app's pause and boot wiring   |
-| `*.dom.test.ts`      | Vitest, jsdom            | The DOM half of a layer, alongside its headless half (swipe, settings storage) |
-| `tests/e2e`          | Playwright, WebKit + Chromium | Mounting, the render loop, pointer-driven steering, pause and resume, rotation, the audio unlock, a nine-size layout matrix, the same nine sizes swept for joystick reach and feedback, and the frame budget at three of them |
+| `*.dom.test.ts`      | Vitest, jsdom            | The DOM half of a layer, alongside its headless half (swipe, keyboard, the stick's hover and keyboard drawing, settings storage) |
+| `tests/e2e`          | Playwright, WebKit + Chromium | Mounting, the render loop, pointer-driven steering, pause and resume, rotation, the audio unlock, a nine-size layout matrix, the same nine sizes swept for joystick reach and feedback, the frame budget at three of them, and — on a desktop-shaped context, the only one where `hover: hover` holds — cursor and keyboard steering |
 
 Three things about this setup are deliberate.
 
@@ -303,10 +304,13 @@ Input is complete to spec §3: the static joystick with its radial and angular
 dead zones, strict 4-way snapping, and the 60 ms window a fresh gesture has to
 agree with itself in before its first direction is latched; the chevron and
 buffered-turn tint that make its state legible; direction latching across a
-lifted thumb; swipe, keyboard
+lifted thumb; swipe, keyboard, cursor-hover
 and gamepad sharing the same intent pipeline; haptics; and the handedness and
 large-stick accessibility options. The stick pins to a corner at tablet widths
-(§2.1) and mirrors for a right-handed player (§3.4).
+(§2.1) and mirrors for a right-handed player (§3.4). On a machine with a cursor
+it is steered by hovering it, and it leans on whichever direction key is held,
+so it is the one control that shows what the game was asked for however the
+player asked (§3.3).
 
 The art and the sound are in, to architecture §5. Pac-Man, the ghosts, their
 eyes, the frightened and flashing frames, eleven frames of dying, eight fruit
@@ -426,14 +430,20 @@ noted as still manual.
 - The ring stays wholly inside the control zone, and steers, from all four
   corners and the middle of the band, at all nine supported sizes on both
   engines — the spec's "no clipping or unreachable controls" criterion
-- The chevron tracks the snapped direction, the knob tints while a turn is
-  buffered and clears when the buffer expires, and the ring eases home over
-  200 ms rather than jumping
+- The chevron tracks the direction the game was asked for, whichever source
+  asked; the knob tints while a turn is buffered and clears when the buffer
+  expires, and the ring eases home over 200 ms rather than jumping
 - The knob stays in its gate: on one axis at a time, stopping inside the ring
   however far past it the thumb goes, and springing back to centre on release
 - Swipe, keyboard and joystick all reach the simulation through the same
   pipeline; a flick under the 24 px threshold does not, and swiping the maze
   never scrolls the page
+- On a desktop-shaped browser context: the cursor steers the stick by resting on
+  it with no button held, reads Up above centre and Left to its left, lets go
+  when it leaves the stick's reach — knob home, latch kept — and does nothing at
+  all crossing the far end of the band. A held arrow or WASD key throws the knob
+  down its slot and springs it back on release while the chevron holds, and a
+  cursor arriving takes the stick off the key
 - Viewport caps DPR at 3 and snaps the tile size to whole device pixels
 - Production bundle is 16.8 kB of JavaScript gzipped against the architecture's
   120 kB budget, and 39 kB of initial payload — the JS, the CSS, the document,

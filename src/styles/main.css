@@ -12,6 +12,7 @@
   --color-joystick: rgba(255, 255, 255, 0.28);
   --color-joystick-knob: rgba(255, 255, 255, 0.5);
   --color-joystick-buffered: rgba(255, 204, 0, 0.55);
+  --color-joystick-hover: rgba(255, 255, 255, 0.6);
 
   /* Overwritten by applyLayout() on every layout change. */
   --hud-height: 48px;
@@ -274,9 +275,25 @@ body {
   will-change: transform;
 }
 
-/* Held: full opacity. The ring lights up under the thumb but does not move. */
+/*
+ * Held: full opacity. The ring lights up under the thumb but does not move.
+ * A held key lights it the same way — whatever is steering, this is the control
+ * that says so (product spec §3.3).
+ */
 .joystick__base--active {
   opacity: 1;
+}
+
+/*
+ * Hovered by a cursor, which is a state touch does not have and needs its own
+ * mark: with no button held, a ring at full opacity is the only thing telling
+ * the player that moving the mouse is now moving Pac-Man. The border brightens
+ * and a halo picks out the area the stick answers to — the rim of it is where
+ * control is about to be given up, so it is worth being able to see.
+ */
+.joystick__base--hover {
+  border-color: var(--color-joystick-hover);
+  box-shadow: 0 0 0 1px var(--color-joystick);
 }
 
 .joystick__knob {
@@ -495,9 +512,11 @@ body {
   pointer-events: none;
 }
 
-/* Devices with no touchscreen use the keyboard, so hide the stick. */
-@media (hover: hover) and (pointer: fine) {
-  .joystick__base {
-    display: none;
-  }
-}
+/*
+ * The stick used to be hidden on machines with a cursor, on the grounds that
+ * they play with the keyboard. It is shown everywhere now, because on those
+ * machines it is a control in its own right — the cursor steers it by resting
+ * on it — and because it is where a keyboard player looks to see what the game
+ * thinks they are asking for (product spec §3.3). Hiding the one thing that
+ * answers the mouse was the bug, not the layout.
+ */

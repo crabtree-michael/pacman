@@ -232,9 +232,20 @@ Pointer/Key/Gamepad events
 
 ### 4.1 Event handling
 
-- **Pointer Events only** (`pointerdown`/`move`/`up`/`cancel`), with
+- **Pointer Events only** (`pointerdown`/`move`/`up`/`cancel`/`leave`), with
   `setPointerCapture` on the joystick so a drag that leaves the control zone
   keeps tracking. Avoids maintaining parallel touch and mouse paths.
+- **Hovering is steering, on machines that can hover.** A `pointermove` with no
+  drag in progress grabs the stick if it lands inside the hover disc and
+  releases it if it does not; `pointerleave` covers a cursor that leaves the
+  band without a last move inside it. Gated on `matchMedia('(hover: hover)')`,
+  read per event so a mouse plugged in mid-session works — the question is
+  whether the machine has a pointer that can *rest* somewhere, not what
+  dispatched this event, and a synthetic mouse event standing in for a tap must
+  not turn the band into a live control. `pointerup` is the one place the
+  pointer *type* is asked for: only a mouse leaves a cursor behind to hover
+  with, and a lifted finger that re-grabbed the stick would send nothing more
+  to let go of it.
 - Handlers are attached to the control-zone element, not `window`, and are
   registered `{ passive: false }` so `preventDefault()` can suppress scrolling
   and native gestures.
@@ -299,6 +310,15 @@ The origin is fixed because the base is: `JoystickView` computes the ring's
 centre with `restPosition` on every layout change and hands it over, which is
 also what keeps `getBoundingClientRect` out of the pointer handlers (§4.4).
 
+Two small pieces of geometry serve the desktop paths and live here with the
+rest of it, DOM-free and unit-tested under Node. `withinHoverArea` answers
+whether a cursor is close enough to the ring to be steering it — a disc of the
+ring's radius plus one knob-radius, scaled like everything else — and
+`throwOffset(dir)` gives the knob's position for a direction that arrived with
+no depth attached, which is what a held key is. Neither touches the latch:
+a key steers through `KeyboardInput` like any other source, and `throwOffset`
+only says where to draw.
+
 The joystick renders as **DOM elements with CSS transforms**, not on the canvas:
 it is compositor-driven, costs zero canvas fill-rate, animates on the GPU, and
 is trivially themeable. `will-change: transform` and translate-only updates keep
@@ -311,7 +331,14 @@ it off the main thread's paint path.
 - `InputController` keeps the last intent from each source and picks the most
   recent by timestamp, so plugging in a keyboard mid-game just works.
 - On death and on level start, the controller is reset to `Direction.None`
-  (pending resolution of open question 1 in the product spec).
+  (pending resolution of open question 1 in the product spec). Sources with
+  input still *happening* re-assert it on the next tick — a thumb still on the
+  stick, a key still down — because a reset is meant to forget input that is
+  over, not input that is live.
+- A keydown is an event and is read once, so pressing a key already latched
+  still steers; what is *held* is tracked separately, for the stick to draw and
+  for that re-assertion. Letting go of one key while another is down re-asserts
+  the one still held, so the simulation and the drawn stick cannot disagree.
 - The controller can be driven by a recorded intent stream instead of DOM
   events; that is the entire test harness for gameplay (§9).
 

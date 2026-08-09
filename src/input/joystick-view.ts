@@ -21,6 +21,18 @@ import {
  * the input latency budget (§4.4).
  */
 
+/**
+ * Desktop only: a cursor steers the stick by being over it, with no button held
+ * (product spec §3.3).
+ *
+ * Gated on the media query rather than on `pointerType`, because the question
+ * is not what dispatched this event but whether the machine has a pointer that
+ * can *rest* somewhere. On a touchscreen there is no such thing — a finger is
+ * either on the glass or gone — and a synthetic mouse event standing in for a
+ * tap must not turn the band into a live control under it.
+ */
+const HOVER_QUERY = '(hover: hover)';
+
 /** Reference width the scale is expressed against — an iPhone 14 (spec §3.1). */
 const SCALE_REFERENCE_PX = 390;
 const SCALE_MIN = 0.85;
@@ -100,11 +112,47 @@ function clampInto(point: Vec2, zone: ZoneSize, half: number): Vec2 {
   };
 }
 
+/**
+ * What the stick has to show this frame that it cannot see for itself.
+ *
+ * The ring is the game's one control, not the joystick's own read-out: whatever
+ * is steering — a thumb, a cursor, a key, a pad — it is what the player looks
+ * at to know what the game thinks they asked for. So the chevron is fed the
+ * *controller's* latched direction rather than this stick's, and a held key is
+ * handed over so the knob can lean on it.
+ */
+export interface JoystickDisplay {
+  /** The direction the simulation is being asked for, whatever asked for it. */
+  requested: Direction;
+  /** A direction held down on the keyboard, or `None`. */
+  held: Direction;
+  /** A turn request is buffered, waiting for a legal moment to fire. */
+  buffered: boolean;
+}
+
+const IDLE_DISPLAY: JoystickDisplay = {
+  requested: Direction.None,
+  held: Direction.None,
+  buffered: false,
+};
+
 export class JoystickView {
   private readonly base: HTMLElement;
   private readonly knob: HTMLElement;
   private zoneRect: DOMRect;
   private activePointerId: number | null = null;
+  /** True while a buttonless cursor is the thing on the stick. */
+  private hovering = false;
+
+  /**
+   * Live rather than read once: a mouse plugged into a tablet mid-session
+   * flips this, and `matches` is a property read cheap enough to do per event.
+   * Absent in jsdom, and on anything without it hover simply never happens.
+   */
+  private readonly hoverQuery: MediaQueryList | null =
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia(HOVER_QUERY)
+      : null;
 
   /** Cached so no pointer handler ever has to ask the layout engine. */
   private scale = 1;
@@ -114,6 +162,9 @@ export class JoystickView {
   private knobTransform = '';
   private chevron: string | null = null;
   private buffered = false;
+  private active = false;
+  /** The last frame's display, so a handler can repaint without one. */
+  private display: JoystickDisplay = IDLE_DISPLAY;
 
   constructor(
     private readonly zone: HTMLElement,
@@ -134,6 +185,10 @@ export class JoystickView {
     zone.addEventListener('pointermove', this.onPointerMove, options);
     zone.addEventListener('pointerup', this.onPointerEnd, options);
     zone.addEventListener('pointercancel', this.onPointerEnd, options);
+    // A cursor can leave the band without a last move inside it — off the
+    // bottom of the window, or out of the document altogether — and a stick
+    // left leaning would go on steering with nothing on it.
+    zone.addEventListener('pointerleave', this.onPointerLeave, options);
   }
 
   /**
@@ -147,6 +202,7 @@ export class JoystickView {
    */
   resize(placement: JoystickPlacement): void {
     this.endDrag();
+    this.endHover();
     this.zoneRect = this.zone.getBoundingClientRect();
     this.scale = this.fittedScale();
     this.joystick.setScale(this.scale);
@@ -174,6 +230,7 @@ export class JoystickView {
     this.zone.removeEventListener('pointermove', this.onPointerMove);
     this.zone.removeEventListener('pointerup', this.onPointerEnd);
     this.zone.removeEventListener('pointercancel', this.onPointerEnd);
+    this.zone.removeEventListener('pointerleave', this.onPointerLeave);
   }
 
   /**
@@ -186,12 +243,16 @@ export class JoystickView {
    * the knob's ring tints while a turn request sits buffered and clears the
    * moment the simulation consumes it.
    *
-   * A released stick has no offset at all, so the same write that tracks the
-   * thumb is also the one that sends the knob home; the CSS eases it there
-   * because the `--active` class it eased against has just come off.
+   * A pointer on the stick outranks a held key, because it is the finer of the
+   * two: a cursor at half throw has said something a key cannot. With neither,
+   * the stick has no offset at all, so the same write that tracks the thumb is
+   * also the one that sends the knob home; the CSS eases it there because the
+   * `--active` class it eased against has just come off.
    */
-  sync(turnBuffered: boolean): void {
-    const offset = this.joystick.knobOffset();
+  sync(display: JoystickDisplay): void {
+    this.display = display;
+
+    const offset = this.joystick.knobOffset() ?? this.joystick.throwOffset(display.held);
     const transform = offset
       ? `translate(-50%, -50%) translate(${offset.x}px, ${offset.y}px)`
       : 'translate(-50%, -50%)';
@@ -200,16 +261,29 @@ export class JoystickView {
       this.knobTransform = transform;
     }
 
-    const chevron = DIRECTION_NAMES[this.joystick.snapped];
+    const chevron = DIRECTION_NAMES[display.requested];
     if (chevron !== this.chevron) {
       this.base.dataset['direction'] = chevron;
       this.chevron = chevron;
     }
 
-    if (turnBuffered !== this.buffered) {
-      this.knob.classList.toggle('joystick__knob--buffered', turnBuffered);
-      this.buffered = turnBuffered;
+    this.setActive(this.joystick.engaged || display.held !== Direction.None);
+
+    if (display.buffered !== this.buffered) {
+      this.knob.classList.toggle('joystick__knob--buffered', display.buffered);
+      this.buffered = display.buffered;
     }
+  }
+
+  /**
+   * Light the ring, or let it fade. The single writer of the class: a press
+   * calls it for the immediacy, and every frame agrees with the press, so the
+   * two can never leave the ring lit over an empty stick.
+   */
+  private setActive(active: boolean): void {
+    if (active === this.active) return;
+    this.active = active;
+    this.base.classList.toggle('joystick__base--active', active);
   }
 
   /** Put the ring's centre at a zone-local point. Only `resize` ever does this. */
@@ -245,19 +319,31 @@ export class JoystickView {
     event.preventDefault();
 
     this.activePointerId = event.pointerId;
+    // A press takes the stick off the cursor and puts it on the drag, without
+    // letting go in between: the position is about to be overwritten anyway.
+    this.hovering = false;
+    this.base.classList.remove('joystick__base--hover');
     this.zone.setPointerCapture(event.pointerId);
 
     // The ring stays where it is (product spec §3.2) — only its opacity reacts.
     // The drag is measured from that fixed centre, so a touch that lands away
     // from it already carries a direction.
-    this.base.classList.add('joystick__base--active');
+    this.setActive(true);
     this.joystick.press({ x: event.clientX, y: event.clientY });
   };
 
   private readonly onPointerMove = (event: PointerEvent): void => {
-    if (event.pointerId !== this.activePointerId) return;
-    event.preventDefault();
-    this.joystick.move({ x: event.clientX, y: event.clientY });
+    if (event.pointerId === this.activePointerId) {
+      event.preventDefault();
+      this.joystick.move({ x: event.clientX, y: event.clientY });
+      return;
+    }
+    // Nothing is down: on a machine with a cursor, being over the stick is
+    // itself the input (product spec §3.3). A second finger during a drag is
+    // still ignored — `activePointerId` is what says a drag owns the stick.
+    if (this.activePointerId === null) {
+      this.hoverTo({ x: event.clientX, y: event.clientY });
+    }
   };
 
   private readonly onPointerEnd = (event: PointerEvent): void => {
@@ -272,7 +358,43 @@ export class JoystickView {
     void wasTap;
 
     this.endDrag(event.pointerId);
+    // The button came up but the cursor did not go anywhere, so the stick goes
+    // back to being hovered rather than idle. Letting go of a mouse is not the
+    // same statement as taking a thumb off the glass — and only a mouse leaves
+    // anything behind to hover with, which is why the type is asked for here
+    // and nowhere else: a lifted finger would otherwise re-grab the stick and
+    // never send another event to let go of it.
+    if (event.pointerType === 'mouse') {
+      this.hoverTo({ x: event.clientX, y: event.clientY });
+    }
   };
+
+  private readonly onPointerLeave = (): void => {
+    this.endHover();
+  };
+
+  /**
+   * The cursor is somewhere. Inside the stick's reach that is a grab it never
+   * has to make explicit; outside it, it is a release — the knob springs home
+   * and the ring fades, while the latched direction rides on exactly as it does
+   * when a thumb lifts (product spec §3.2, §3.3).
+   */
+  private hoverTo(point: Vec2): void {
+    if (this.activePointerId !== null) return; // A drag owns the stick.
+    if (!(this.hoverQuery?.matches ?? false) || !this.joystick.withinHoverArea(point)) {
+      this.endHover();
+      return;
+    }
+
+    if (this.hovering) {
+      this.joystick.move(point);
+      return;
+    }
+    this.hovering = true;
+    this.base.classList.add('joystick__base--hover');
+    this.setActive(true);
+    this.joystick.press(point);
+  }
 
   /**
    * Let go: drop the capture, fade the ring back out over 200 ms and let the
@@ -293,8 +415,21 @@ export class JoystickView {
     this.activePointerId = null;
 
     this.joystick.release();
-    this.base.classList.remove('joystick__base--active');
-    this.sync(this.buffered);
+    this.sync(this.display);
+  }
+
+  /**
+   * The cursor has left the stick's reach. Same ending as a lifted thumb, for
+   * the same reason it has to happen here rather than on the next frame: a
+   * paused or backgrounded game gets no more frames, and a knob left leaning is
+   * the one thing on screen still claiming somebody is steering.
+   */
+  private endHover(): void {
+    if (!this.hovering) return;
+    this.hovering = false;
+    this.base.classList.remove('joystick__base--hover');
+    this.joystick.release();
+    this.sync(this.display);
   }
 }
 

@@ -32,6 +32,20 @@ export const JOYSTICK_DEAD_ZONE_PX = 12;
 export const JOYSTICK_RECENTRE_PX = 8;
 
 /**
+ * How far past the ring's rim a hovering cursor may stray and still be steering,
+ * in CSS px at scale 1 (product spec §3.3).
+ *
+ * A mouse has no press to say "I mean this one" — the cursor is simply
+ * somewhere — so the area it steers from has to be small enough that crossing
+ * the band on the way to something else is not steering, and large enough that
+ * pushing the stick to its stop does not fall out of it. One knob-radius past
+ * the rim is both, and is not an arbitrary number: it is exactly how far the
+ * knob's own centre stops short of the rim at full throw, so the cursor keeps
+ * control for as far past the gate as the knob still had to give.
+ */
+export const JOYSTICK_HOVER_MARGIN_PX = JOYSTICK_KNOB_PX / 2;
+
+/**
  * How long a fresh drag has to hold still on one direction before the stick
  * commits to it, in ms (spec §3.2).
  *
@@ -162,6 +176,23 @@ export class VirtualJoystick implements InputSource {
     return JOYSTICK_TRAVEL_PX * this.sizeScale;
   }
 
+  /** Radius of the disc a hovering cursor steers from, at the current size. */
+  get hoverRadius(): number {
+    return (JOYSTICK_BASE_PX / 2 + JOYSTICK_HOVER_MARGIN_PX) * this.sizeScale;
+  }
+
+  /**
+   * Is a cursor at `point` inside the area the stick answers to?
+   *
+   * Only the hovering mouse asks: a thumb owns the whole band, because a touch
+   * is a statement of intent wherever it lands, and a drag that wanders out of
+   * the ring is still that touch (§3.2). A cursor is only ever *somewhere*, so
+   * it has to be somewhere in particular before it counts.
+   */
+  withinHoverArea(point: Vec2): boolean {
+    return Math.hypot(point.x - this.origin.x, point.y - this.origin.y) <= this.hoverRadius;
+  }
+
   /** How far the thumb is from the ring's centre, or 0 while nothing is down. */
   get dragDistance(): number {
     if (!this.point) return 0;
@@ -173,17 +204,32 @@ export class VirtualJoystick implements InputSource {
     return this.latched;
   }
 
-  /** True while a thumb is down; the view fades the ring in on the strength of it. */
+  /**
+   * True while something is on the stick — a thumb, or a cursor inside the
+   * hover area. The view fades the ring in on the strength of it.
+   */
   get engaged(): boolean {
     return this.point !== null;
   }
 
   /**
-   * A thumb goes down. A gesture starts here, so this is where the stick
-   * forgets having decided anything: every fresh grab is read from scratch,
-   * with no credit for how decisively the last one ended. The window itself
-   * starts on the first tick that reads a direction, which is when there is
-   * finally something to be undecided about.
+   * Where the knob sits when the stick is thrown fully along `dir`: the shape a
+   * held key gives it, since a key has no analogue depth to report and so
+   * pushes the gate to its stop or not at all. `None` is not a throw, so it
+   * draws nothing and the view sends the knob home.
+   */
+  throwOffset(dir: Direction): Vec2 | null {
+    if (dir === Direction.None) return null;
+    const axis = DIRECTION_DELTA[dir];
+    return { x: axis.x * this.travel, y: axis.y * this.travel };
+  }
+
+  /**
+   * A thumb goes down, or a cursor crosses into the hover area. A gesture
+   * starts here, so this is where the stick forgets having decided anything:
+   * every fresh grab is read from scratch, with no credit for how decisively
+   * the last one ended. The window itself starts on the first tick that reads a
+   * direction, which is when there is finally something to be undecided about.
    */
   press(point: Vec2): void {
     this.point = point;
@@ -198,8 +244,9 @@ export class VirtualJoystick implements InputSource {
   }
 
   /**
-   * Release. The latch is deliberately *not* cleared — Pac-Man carries on in
-   * the last direction, exactly as with an arcade stick let go mid-corridor.
+   * Release — a thumb lifting, or a cursor leaving the hover area. The latch is
+   * deliberately *not* cleared: Pac-Man carries on in the last direction,
+   * exactly as with an arcade stick let go mid-corridor.
    *
    * A lift also ends the argument. A flick that came and went inside the decide
    * window never got to agree with itself, but it is not therefore meaningless:
