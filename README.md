@@ -443,9 +443,10 @@ Two things in it are worth a spec owner's eye:
   there; §4.2's "100% from level 5" plus §4.5's "clamps to its hardest values"
   read as staying at 100%, which is what the table does.
 
-The Cruise Elroy thresholds and both Elroy speeds are in the table too, unused
-until the ghost ticket reads them. They are data the spec asks for (§4.3), and
-data is cheaper to land now than to retrofit under a ghost that already ships.
+The Cruise Elroy thresholds and both Elroy speeds are in the table too, and the
+ghosts now read them. The ghost ticket added two rows of its own on the same
+rule: the house dot thresholds past level 1 and the release timeout, which §4.3
+states for level 1 and leaves to the arcade after it.
 
 ### Chosen: contact is a shared tile, and the pass-through stays
 
@@ -467,6 +468,57 @@ named constants in `sim/pacman.ts`.
 The fruit's dot thresholds count power pellets as dots, on the same reading:
 §4.4 says "after 70 ... pellets are eaten", and the arcade counts all 244
 collectibles.
+
+### Filled in: the scatter/chase schedules past level 1
+
+Product spec §4.3 states level 1's alternation and stops there. The rest is the
+arcade's, on the same rule the tuning table follows — including the two entries
+that look like typos and are not. From level 2 the fifth chase runs about
+seventeen minutes and is ended by a scatter *one frame long*. That frame exists
+purely to fire the reversal every scatter↔chase transition carries, and it is
+why a late-level ghost train suddenly turns around after what felt like
+permanent chase. Straightening it would be a nicer-looking table and a different
+game.
+
+Frightened time does not advance the cursor, which §4.3 states outright. The
+consequence worth knowing is that a pellet eaten in the last second of a scatter
+leaves that second of scatter waiting on the other side of the blue.
+
+### Kept: the scatter corners sit off the board
+
+All four are three rows above the maze or two below it, which is where the
+arcade's are. The gap is not cosmetic. Pull Blinky's corner onto the board — row
+0 rather than row -3 — and a scattering Blinky prefers the step down at (9, 14)
+to the step into the tunnel by three units of squared distance, then spends the
+whole scatter circling the ghost house instead of going home. An unreachable
+target is what turns "walk towards it" into a loop around a corner block.
+
+### Chosen: one house counter, not the arcade's two
+
+Spec §4.3 gives level 1's dot thresholds — Pinky at 0, Inky at 30, Clyde at 60 —
+and the no-dots-eaten fallback, and is silent on what happens after a death. The
+arcade switches at that point from a per-ghost counter to a second, global one
+with its own thresholds. This ships one counter that restarts when the house
+refills, which is the same idea with fewer moving parts: the three ghosts that
+respawn have to be earned out again rather than pouring onto a board the player
+has already half-cleared. It is a slightly kinder respawn than the original's.
+Say the word and the second counter goes in.
+
+### Chosen: `Leaving` is a fifth mode, and the eaten freeze is a field
+
+Two structural calls the spec does not cover.
+
+- **`Leaving`.** §4.3 names four modes. The walk from a spot in the house out
+  through the door is none of them: it is the one stretch where a ghost ignores
+  the maze entirely — the door is a wall to everything that reads the board —
+  and a ghost part-way out is not something Pac-Man can run into. Modelling it as
+  a mode keeps both of those facts in one place instead of as flags on `House`.
+- **The freeze.** The arcade holds the whole board for about a second while an
+  eaten ghost's score shows, and that second is thinking time in the middle of a
+  chase. It is `state.freezeMs` rather than a phase, because nothing about the
+  game *flow* changes — no card, no reset — and a phase would need the pause
+  button given a path back out of it. What changes is that `Playing` skips a tick
+  of everything, which is one branch.
 
 ### Fixed on the way past: Pac-Man's shut mouth drew nothing
 
