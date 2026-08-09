@@ -14,11 +14,11 @@ import {
  * costs zero canvas fill-rate, animates on the GPU, and is trivially themeable
  * (architecture §4.2).
  *
- * The handlers here do nothing but store the raw pointer position and move a
- * transform. No snapping, no dead zone, and above all no
- * `getBoundingClientRect` — the zone's rect and the stick's scale are cached on
- * resize, because a synchronous layout read inside a pointer handler is the
- * classic way to blow the input latency budget (§4.4).
+ * The handlers here do nothing but store the raw pointer position. No snapping,
+ * no dead zone, and above all no `getBoundingClientRect` — the zone's rect, the
+ * stick's scale and the ring's centre are cached on resize, because a
+ * synchronous layout read inside a pointer handler is the classic way to blow
+ * the input latency budget (§4.4).
  */
 
 /** Reference width the scale is expressed against — an iPhone 14 (spec §3.1). */
@@ -63,12 +63,12 @@ export interface ZoneSize {
 }
 
 /**
- * Where the ring sits when nothing is touching it, in zone-local px.
+ * Where the ring sits, in zone-local px. It is static (product spec §3.2), so
+ * this is also where every drag is measured from.
  *
- * Computed rather than measured. An earlier version read the resting place back
- * out of the rendered element, which made it depend on whether the transform
- * that positions it had been applied yet — the stick then floated to an offset
- * from a place it had never actually been. Arithmetic has no such ordering, and
+ * Computed rather than measured. An earlier version read the position back out
+ * of the rendered element, which made it depend on whether the transform that
+ * positions it had been applied yet. Arithmetic has no such ordering, and
  * unlike a `getBoundingClientRect` it can be tested without a browser.
  */
 export function restPosition(zone: ZoneSize, baseSize: number, placement: JoystickPlacement): Vec2 {
@@ -159,11 +159,14 @@ export class JoystickView {
     );
 
     this.rest = restPosition(this.zoneRect, size, placement);
-    // A relayout lands the ring where the new bands put it. Animating that
-    // would mean watching it glide across a screen that has just rotated, and
-    // during load it would chase the layout as it settles.
-    this.base.classList.remove('joystick__base--returning');
     this.moveBaseTo(this.rest);
+    // The ring is where every drag is measured from, so the joystick needs it in
+    // client coordinates. Handing it over here is what keeps the pointer
+    // handlers free of layout reads.
+    this.joystick.setOrigin({
+      x: this.zoneRect.left + this.rest.x,
+      y: this.zoneRect.top + this.rest.y,
+    });
   }
 
   destroy(): void {
@@ -205,7 +208,7 @@ export class JoystickView {
     }
   }
 
-  /** Put the ring's centre at a zone-local point. */
+  /** Put the ring's centre at a zone-local point. Only `resize` ever does this. */
   private moveBaseTo(point: Vec2): void {
     this.base.style.transform = `translate(-50%, -50%) translate(${point.x}px, ${point.y}px)`;
   }
@@ -240,23 +243,11 @@ export class JoystickView {
     this.activePointerId = event.pointerId;
     this.zone.setPointerCapture(event.pointerId);
 
-    // Float the base to the thumb, clamped so the whole ring stays inside the
-    // zone. Both this and the resting place are zone-local, so the ring lands
-    // where the thumb is regardless of where it was resting.
-    const half = (JOYSTICK_BASE_PX * this.joystick.sizeScale) / 2;
-    const point = clampInto(
-      { x: event.clientX - this.zoneRect.left, y: event.clientY - this.zoneRect.top },
-      this.zoneRect,
-      half,
-    );
-
-    // The ring snaps to the thumb, so whatever return is in flight is over.
-    this.base.classList.remove('joystick__base--returning');
+    // The ring stays where it is (product spec §3.2) — only its opacity reacts.
+    // The drag is measured from that fixed centre, so a touch that lands away
+    // from it already carries a direction.
     this.base.classList.add('joystick__base--active');
-    this.moveBaseTo(point);
-
-    this.joystick.press({ x: this.zoneRect.left + point.x, y: this.zoneRect.top + point.y });
-    this.joystick.move({ x: event.clientX, y: event.clientY });
+    this.joystick.press({ x: event.clientX, y: event.clientY });
   };
 
   private readonly onPointerMove = (event: PointerEvent): void => {
@@ -279,8 +270,8 @@ export class JoystickView {
   };
 
   /**
-   * Let go: drop the capture, put the ring back at its resting place and let
-   * the CSS transition carry it there over 200 ms. The *latch* is untouched —
+   * Let go: drop the capture and fade the ring back out over 200 ms. It has not
+   * moved, so there is nothing to travel home. The *latch* is untouched —
    * releasing the stick does not stop Pac-Man (product spec §3.2).
    */
   private endDrag(pointerId = this.activePointerId): void {
@@ -292,8 +283,6 @@ export class JoystickView {
 
     this.joystick.release();
     this.base.classList.remove('joystick__base--active');
-    this.base.classList.add('joystick__base--returning');
-    this.moveBaseTo(this.rest);
     this.sync(this.buffered);
   }
 }

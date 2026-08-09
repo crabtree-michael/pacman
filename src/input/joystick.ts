@@ -2,7 +2,7 @@ import { Direction } from '../sim/types';
 import type { DirectionIntent, InputSource } from './controller';
 
 /**
- * Virtual joystick logic — dead zone, 4-way snapping, hysteresis.
+ * Virtual joystick logic — dead zones, angular sectors, 4-way snapping.
  *
  * Deliberately free of DOM: `joystick-view.ts` owns the elements and the
  * pointer handlers and only ever pushes raw positions in here. Touch events can
@@ -18,10 +18,17 @@ export const JOYSTICK_DEAD_ZONE_PX = 12;
 export const JOYSTICK_RECENTRE_PX = 8;
 
 /**
- * A challenging axis must beat the latched one by this margin before the
- * direction switches. Without it, near-diagonal input flickers (spec §3.2).
+ * Width of the dead wedge straddling each diagonal, in degrees. A drag that
+ * lands in one is too shallow to read as either neighbouring direction, so it
+ * emits nothing rather than guessing at the nearer one (spec §3.2).
  */
-export const HYSTERESIS = 1.15;
+export const ANGULAR_DEAD_ZONE_DEG = 45;
+
+/**
+ * How far off its axis a drag may sit and still count: 22.5° either side, so
+ * the four acceptance arcs and the four dead wedges each take half the circle.
+ */
+export const DIRECTION_ARC_HALF_DEG = (90 - ANGULAR_DEAD_ZONE_DEG) / 2;
 
 /** Accessibility: "enlarges the joystick by 1.5x" (product spec §3.4). */
 export const ACCESSIBLE_SIZE_FACTOR = 1.5;
@@ -43,9 +50,13 @@ export interface Vec2 {
 export class VirtualJoystick implements InputSource {
   readonly name = 'joystick';
 
-  /** Origin, set on pointerdown — the stick floats to the thumb. */
-  private base: Vec2 | null = null;
-  /** Latest raw pointer position. Written by the view, read once per tick. */
+  /**
+   * Centre of the base ring in client coordinates. The stick is static, so this
+   * is a layout constant: the view computes it on every layout change and never
+   * touches it from a pointer handler.
+   */
+  private origin: Vec2 = { x: 0, y: 0 };
+  /** Latest raw pointer position, or null while nothing is touching. */
   private point: Vec2 | null = null;
   private latched: Direction = Direction.None;
 
@@ -60,6 +71,10 @@ export class VirtualJoystick implements InputSource {
 
   setAccessible(accessible: boolean): void {
     this.accessible = accessible;
+  }
+
+  setOrigin(origin: Vec2): void {
+    this.origin = { x: origin.x, y: origin.y };
   }
 
   /** The accessibility enlargement alone, without the screen scale. */
@@ -88,12 +103,11 @@ export class VirtualJoystick implements InputSource {
 
   /** True while a thumb is down; the view fades the ring in on the strength of it. */
   get engaged(): boolean {
-    return this.base !== null;
+    return this.point !== null;
   }
 
-  press(base: Vec2): void {
-    this.base = base;
-    this.point = base;
+  press(point: Vec2): void {
+    this.point = point;
   }
 
   move(point: Vec2): void {
@@ -105,15 +119,14 @@ export class VirtualJoystick implements InputSource {
    * the last direction, exactly as with an arcade stick let go mid-corridor.
    */
   release(): void {
-    this.base = null;
     this.point = null;
   }
 
   /** Offset of the knob from the base, clamped to the drag radius. */
   knobOffset(): Vec2 | null {
-    if (!this.base || !this.point) return null;
-    const dx = this.point.x - this.base.x;
-    const dy = this.point.y - this.base.y;
+    if (!this.point) return null;
+    const dx = this.point.x - this.origin.x;
+    const dy = this.point.y - this.origin.y;
     const distance = Math.hypot(dx, dy);
     if (distance <= this.maxRadius || distance === 0) return { x: dx, y: dy };
     const clamp = this.maxRadius / distance;
@@ -121,14 +134,16 @@ export class VirtualJoystick implements InputSource {
   }
 
   sample(nowMs: number): DirectionIntent | null {
-    if (!this.base || !this.point) return null; // Released: keep the latch.
+    if (!this.point) return null; // Released: keep the latch.
 
-    const dx = this.point.x - this.base.x;
-    const dy = this.point.y - this.base.y;
+    const dx = this.point.x - this.origin.x;
+    const dy = this.point.y - this.origin.y;
     if (Math.hypot(dx, dy) < this.deadZone) return null;
 
-    const next = snapWithHysteresis(dx, dy, this.latched);
-    if (next === this.latched) return null;
+    const next = snapToCardinal(dx, dy);
+    // None means the drag sits in a dead wedge: no new intent, and the latched
+    // direction rides on untouched.
+    if (next === Direction.None || next === this.latched) return null;
 
     this.latched = next;
     return { dir: next, timestamp: nowMs, source: this.name };
@@ -150,23 +165,23 @@ export class VirtualJoystick implements InputSource {
 }
 
 /**
- * Map a drag vector to one of four directions.
+ * Map a drag vector to one of the four directions, or to `None`.
  *
- * Switching *axis* needs to beat the incumbent by the hysteresis margin;
- * reversing along the axis you are already on is free, because that is a
- * deliberate flick rather than diagonal noise.
+ * Each direction owns a 45° arc centred on its axis; the 45° wedges around the
+ * diagonals belong to no one. Committing to a direction only when the player is
+ * unambiguously pushing that way is what replaced the old hysteresis margin: a
+ * wobble near a boundary now reads as "not asking for anything" instead of
+ * flickering between two neighbours.
  */
-export function snapWithHysteresis(dx: number, dy: number, latched: Direction): Direction {
+export function snapToCardinal(dx: number, dy: number): Direction {
   const ax = Math.abs(dx);
   const ay = Math.abs(dy);
-  const horizontal = dx > 0 ? Direction.Right : Direction.Left;
-  const vertical = dy > 0 ? Direction.Down : Direction.Up;
+  if (ax === 0 && ay === 0) return Direction.None;
 
-  const latchedHorizontal = latched === Direction.Left || latched === Direction.Right;
-  const latchedVertical = latched === Direction.Up || latched === Direction.Down;
+  // Angle to the nearest axis: 0° is dead on it, 45° is a perfect diagonal.
+  const offAxisDeg = (Math.atan2(Math.min(ax, ay), Math.max(ax, ay)) * 180) / Math.PI;
+  if (offAxisDeg > DIRECTION_ARC_HALF_DEG) return Direction.None;
 
-  if (latchedHorizontal && ay <= ax * HYSTERESIS) return horizontal;
-  if (latchedVertical && ax <= ay * HYSTERESIS) return vertical;
-
-  return ax >= ay ? horizontal : vertical;
+  if (ax >= ay) return dx > 0 ? Direction.Right : Direction.Left;
+  return dy > 0 ? Direction.Down : Direction.Up; // y grows downwards on screen.
 }

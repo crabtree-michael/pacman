@@ -140,7 +140,7 @@ test.describe('skeleton smoke', () => {
     expect(frames.size, 'distinct frames drawn once play began').toBeGreaterThanOrEqual(3);
   });
 
-  test('floats the joystick to the thumb and follows a drag', async ({ page }) => {
+  test('keeps the joystick base still and follows a drag', async ({ page }) => {
     await page.goto('/');
     // The knob is moved by the render loop, not by the pointer handler, so the
     // layers must be up before any of this means anything.
@@ -160,10 +160,14 @@ test.describe('skeleton smoke', () => {
     const centreY = box.y + box.height / 2;
 
     await expect(base).not.toHaveClass(/joystick__base--active/);
+    const restingBase = (await base.boundingBox())!;
 
-    await page.mouse.move(centreX, centreY);
+    // Touch down well away from the ring's centre: the base must stay put
+    // rather than spawn under the thumb (spec §3.2).
+    await page.mouse.move(centreX - 70, centreY + 30);
     await page.mouse.down();
     await expect(base).toHaveClass(/joystick__base--active/);
+    expect(await base.boundingBox()).toEqual(restingBase);
 
     // Drag well past the 12px dead zone. The knob catches up on the next
     // rendered frame, so poll for it rather than reading once.
@@ -171,6 +175,7 @@ test.describe('skeleton smoke', () => {
     await expect
       .poll(transform, { message: 'the knob should have left the centre' })
       .not.toBe(CENTRED);
+    expect(await base.boundingBox()).toEqual(restingBase);
 
     await page.mouse.up();
     await expect(base).not.toHaveClass(/joystick__base--active/);
