@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { JoystickView, type JoystickPlacement } from '../../src/input/joystick-view';
-import { VirtualJoystick } from '../../src/input/joystick';
+import { JoystickView, restPosition, type JoystickPlacement } from '../../src/input/joystick-view';
+import { JOYSTICK_BASE_PX, VirtualJoystick } from '../../src/input/joystick';
 import { Direction } from '../../src/sim/types';
 
 /**
@@ -45,9 +45,18 @@ function frame(display: Partial<Parameters<JoystickView['sync']>[0]> = {}): void
   });
 }
 
-/** The ring's centre in client coordinates, as `resize` worked it out. */
+/**
+ * The ring's centre in client coordinates, as `resize` worked it out.
+ *
+ * Derived rather than assumed to be the middle of the band: the stick docks
+ * against the bottom in portrait (product spec §2.1), and a test that guessed
+ * at the centre would measure every hover from a few px off the real one — near
+ * enough to pass on the axes and to fail on a half-throw push, which is exactly
+ * the reading it would then be blaming the wrong code for.
+ */
 function centre(): { x: number; y: number } {
-  return { x: ZONE.left + ZONE.width / 2, y: ZONE.top + ZONE.height / 2 };
+  const rest = restPosition(ZONE, JOYSTICK_BASE_PX * joystick.sizeScale, PHONE);
+  return { x: ZONE.left + rest.x, y: ZONE.top + rest.y };
 }
 
 beforeEach(() => {
