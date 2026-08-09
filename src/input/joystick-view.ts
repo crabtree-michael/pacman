@@ -2,6 +2,7 @@ import {
   JOYSTICK_BASE_PX,
   JOYSTICK_KNOB_PX,
   JOYSTICK_RECENTRE_PX,
+  type Vec2,
   type VirtualJoystick,
 } from './joystick';
 
@@ -14,14 +15,13 @@ import {
  *
  * The handlers here do nothing but store the raw pointer position and move a
  * transform. No snapping, no dead zone, and above all no
- * `getBoundingClientRect` — the zone's rect is cached on resize, because a
- * synchronous layout read inside a pointer handler is the classic way to blow
- * the input latency budget (§4.4).
+ * `getBoundingClientRect` — the base sits still, so its centre is measured on
+ * resize and cached, because a synchronous layout read inside a pointer handler
+ * is the classic way to blow the input latency budget (§4.4).
  */
 export class JoystickView {
   private readonly base: HTMLElement;
   private readonly knob: HTMLElement;
-  private zoneRect: DOMRect;
   private activePointerId: number | null = null;
 
   constructor(
@@ -35,7 +35,7 @@ export class JoystickView {
     }
     this.base = base;
     this.knob = knob;
-    this.zoneRect = zone.getBoundingClientRect();
+    this.resize();
 
     // passive:false so preventDefault can suppress native gestures (§4.1).
     const options: AddEventListenerOptions = { passive: false };
@@ -46,17 +46,19 @@ export class JoystickView {
   }
 
   /**
-   * Re-measure and rescale. Called on every layout change; the cached rect is
+   * Re-measure and rescale. Called on every layout change; the cached origin is
    * what keeps the pointer handlers free of layout reads.
    */
   resize(): void {
-    this.zoneRect = this.zone.getBoundingClientRect();
-
     // Same physical size on a small Android and a Pro Max (product spec §3.1).
     const scale = Math.min(1.25, Math.max(0.85, window.innerWidth / 390));
     this.joystick.setScale(scale);
     this.zone.style.setProperty('--joystick-base-size', `${JOYSTICK_BASE_PX * scale}px`);
     this.zone.style.setProperty('--joystick-knob-size', `${JOYSTICK_KNOB_PX * scale}px`);
+
+    // Measured after the size variables land, so the ring is already at its new
+    // diameter when we take its centre.
+    this.joystick.setOrigin(this.measureOrigin());
   }
 
   destroy(): void {
@@ -74,6 +76,18 @@ export class JoystickView {
       : 'translate(-50%, -50%)';
   }
 
+  /** Centre of the base ring in client coordinates — CSS decides where it sits. */
+  private measureOrigin(): Vec2 {
+    const base = this.base.getBoundingClientRect();
+    if (base.width > 0 && base.height > 0) {
+      return { x: base.left + base.width / 2, y: base.top + base.height / 2 };
+    }
+    // The ring is hidden on pointer:fine devices, which measure as a zero-sized
+    // box; fall back to the middle of the band so a drag there still steers.
+    const zone = this.zone.getBoundingClientRect();
+    return { x: zone.left + zone.width / 2, y: zone.top + zone.height / 2 };
+  }
+
   private readonly onPointerDown = (event: PointerEvent): void => {
     if (this.activePointerId !== null) return; // Ignore a second thumb.
     event.preventDefault();
@@ -81,16 +95,9 @@ export class JoystickView {
     this.activePointerId = event.pointerId;
     this.zone.setPointerCapture(event.pointerId);
 
-    // Float the base to the thumb, clamped so the whole ring stays in the zone.
-    const half = (JOYSTICK_BASE_PX * this.scaleFromCss()) / 2;
-    const localX = clamp(event.clientX - this.zoneRect.left, half, this.zoneRect.width - half);
-    const localY = clamp(event.clientY - this.zoneRect.top, half, this.zoneRect.height - half);
-    this.base.style.left = `${localX}px`;
-    this.base.style.top = `${localY}px`;
+    // The base stays put (product spec §3.2) — only its opacity reacts.
     this.base.classList.add('joystick__base--active');
-
-    this.joystick.press({ x: this.zoneRect.left + localX, y: this.zoneRect.top + localY });
-    this.joystick.move({ x: event.clientX, y: event.clientY });
+    this.joystick.press({ x: event.clientX, y: event.clientY });
   };
 
   private readonly onPointerMove = (event: PointerEvent): void => {
@@ -116,17 +123,6 @@ export class JoystickView {
 
     this.joystick.release();
     this.base.classList.remove('joystick__base--active');
-    this.base.style.left = '';
-    this.base.style.top = '';
     this.syncKnob();
   };
-
-  private scaleFromCss(): number {
-    return Math.min(1.25, Math.max(0.85, window.innerWidth / 390));
-  }
-}
-
-function clamp(value: number, min: number, max: number): number {
-  if (max < min) return (min + max) / 2;
-  return Math.min(max, Math.max(min, value));
 }

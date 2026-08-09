@@ -163,27 +163,25 @@ body {
   border: 2px solid var(--color-joystick);
   border-radius: 50%;
   opacity: 0.4;
-  /* JoystickView writes left/top on pointerdown to float the stick to the
-     thumb; translate(-50%, -50%) keeps those coordinates centre-relative. */
+  /* The ring never moves (product spec §3.2), so its place is pure CSS: the
+     translate keeps the left/bottom pair centre-relative. */
   transform: translate(-50%, 50%);
   transition: opacity 200ms ease-out;
 }
 
+/* Touching the band lights the ring up; it does not move it. */
 .joystick__base--active {
-  bottom: auto;
   opacity: 1;
-  transform: translate(-50%, -50%);
 }
 
 /*
- * On a screen wider than a thumb arc the stick rests bottom-left rather than
- * centred (product spec §2.1). Only the *resting* place moves — pointerdown
- * still floats the base to wherever the thumb lands, anywhere in the band.
+ * On a screen wider than a thumb arc the stick sits bottom-left rather than
+ * centred (product spec §2.1) — still a fixed spot, just a different one.
  *
  * The inset clears the spec's 16 px safe-area margin (§2.4); `bottom` carries
- * the extra half-diameter because the resting transform translates down 50%.
+ * the extra half-diameter because the transform translates down 50%.
  */
-.app[data-tablet='true'][data-orientation='portrait'] .joystick__base:not(.joystick__base--active) {
+.app[data-tablet='true'][data-orientation='portrait'] .joystick__base {
   left: calc(var(--joystick-inset) + var(--joystick-base-size) / 2);
   bottom: calc(var(--joystick-inset) + var(--joystick-base-size) / 2);
 }

@@ -98,7 +98,7 @@ src/
     overlay-layer.ts        The card for the current phase, redrawn on change
   input/
     controller.ts           Arbitration and latching
-    joystick.ts             Dead zone, 4-way snapping, hysteresis (no DOM)
+    joystick.ts             Dead zones, 4-way snapping, latching (no DOM)
     joystick-view.ts        Pointer handlers and CSS transforms
     keyboard.ts             Desktop convenience
   ui/hud.ts                 Score, high score, lives (DOM, not canvas)
@@ -129,7 +129,7 @@ Five invariants hold this together, and each has a cost to give up:
   everywhere; a 120 Hz panel renders twice per tick and blends between the two
   most recent states.
 - **Input is intent, not action.** Pointer handlers only store a raw position.
-  Snapping, dead zone and hysteresis run once per tick, and the result is a
+  Snapping and both dead zones run once per tick, and the result is a
   direction *request* the simulation applies when it becomes legal.
 - **Game flow is a table, not a tangle.** Every screen the game can be on is a
   `phase`, and the only way between two of them is an entry in the transition
@@ -162,7 +162,7 @@ should own that second gesture are `TODO(ui)`.
 | -------------------- | ------------------------ | ------------------------------------------------------------------- |
 | `tests/sim`          | Vitest, Node             | Turn legality, wall stops, turn-buffer expiry, tunnel wrap, the phase machine, the PRNG |
 | `tests/app`          | Vitest, Node             | Layout bands and viewport fitting, snapshotted over a device matrix  |
-| `tests/input`        | Vitest, Node             | Dead zone, 4-way snapping, hysteresis, latching                      |
+| `tests/input`        | Vitest, Node             | Dead zones, 4-way snapping, latching                                 |
 | `tests/replays`      | Vitest, Node             | A scripted input stream run headless, hashed to one digest           |
 | `tests/boundary`     | Vitest, Node             | The `sim/` isolation rule                                            |
 | `tests/dom`          | Vitest, jsdom            | The HUD; the loop, on a fake clock; the app's pause and boot wiring   |
@@ -220,7 +220,7 @@ The type-level half of the same rule is the two-project tsconfig: `src/` gets
 Working: build tooling, the fixed-timestep loop with visibility suspend, the
 game-flow state machine with pause and restart, the three-layer renderer with
 DPR-capped viewport fitting, grid-locked movement with turn buffering and
-tunnel wrap, the floating joystick with dead zone and hysteresis (pinned
+tunnel wrap, the static joystick with its radial and angular dead zones (pinned
 bottom-left at tablet widths, per spec §2.1), keyboard input, the HUD, and the
 portrait/landscape layout.
 
@@ -271,8 +271,8 @@ noted as still manual.
   leaves the countdown, positions and score exactly as they were
 - Reversal turns on the spot mid-corridor, as the spec requires
 - Two identical runs produce bit-identical state
-- Joystick hysteresis holds at a 1.10x challenge and switches at 1.20x, per the
-  spec's 15% margin
+- The joystick emits only Up/Down/Left/Right, and nothing at all while the drag
+  sits in the 45° wedge around a diagonal
 - Viewport caps DPR at 3 and snaps the tile size to whole device pixels
 - Production bundle is 7.6 kB gzipped, against the architecture's 120 kB budget
   *(manual — the CI gate from architecture §7 is not built)*
