@@ -162,13 +162,17 @@ body {
  * A life is a Pac-Man, not a dot (product spec §4.5). The wedge is a
  * conic-gradient rather than an image so it costs no request and stays sharp at
  * any density; the atlas sprite replaces it with the animated one.
+ *
+ * `from 115deg` puts the transparent 310deg-360deg band at 65deg-115deg on the
+ * dial. Conic angles run clockwise from 12 o'clock, so that centres the mouth on
+ * 90deg — 3 o'clock — and the icon faces right, as the arcade one does.
  */
 .status__life {
   width: 0.85rem;
   height: 0.85rem;
   border-radius: 50%;
   background: conic-gradient(
-    from 205deg,
+    from 115deg,
     var(--color-accent) 0deg 310deg,
     transparent 310deg 360deg
   );
