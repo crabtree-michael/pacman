@@ -15,6 +15,11 @@ export interface InputSource {
   readonly name: string;
   /** Called once per tick. Return an intent only when it *changes*. */
   sample(nowMs: number): DirectionIntent | null;
+  /**
+   * Forget what was last emitted, so the next sample re-reports the live input.
+   * Optional: a source with no memory of its own has nothing to clear.
+   */
+  reset?(): void;
   destroy(): void;
 }
 
@@ -54,13 +59,28 @@ export class InputController {
     return { dir: this.latched, serial: this.serial };
   }
 
+  /** The direction currently being requested. Read by the HUD and haptics. */
+  get direction(): Direction {
+    return this.latched;
+  }
+
   /**
    * Clear the latch — used on death and level start so the player does not
    * respawn already walking into a ghost (product spec open question 1).
+   *
+   * The sources are cleared too, and that part is not optional. A source only
+   * emits on *change*, so a joystick still latched Right would report nothing
+   * on the next tick and the controller would sit at `None` with the player's
+   * thumb visibly pushed right. Clearing both means a thumb that is still down
+   * re-reports itself immediately — a held stick is a live request, and only
+   * the sticky memory of a released one is meant to be forgotten.
    */
   reset(): void {
     this.latched = Direction.None;
     this.latchedAt = 0;
+    for (const source of this.sources) {
+      source.reset?.();
+    }
   }
 
   destroy(): void {

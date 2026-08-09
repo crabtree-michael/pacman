@@ -11,6 +11,7 @@
   --color-accent: #ffcc00;
   --color-joystick: rgba(255, 255, 255, 0.28);
   --color-joystick-knob: rgba(255, 255, 255, 0.5);
+  --color-joystick-buffered: rgba(255, 204, 0, 0.55);
 
   /* Overwritten by applyLayout() on every layout change. */
   --hud-height: 48px;
@@ -20,8 +21,6 @@
   --control-zone: 180px;
   --joystick-base-size: 128px;
   --joystick-knob-size: 56px;
-  /* Corner inset for the tablet resting position; clears the 16px of spec §2.4. */
-  --joystick-inset: 24px;
 
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -154,38 +153,43 @@ body {
   touch-action: none;
 }
 
+/*
+ * JoystickView owns where the ring is, as a single translate to a zone-local
+ * point — its resting place on a phone, its corner on a tablet, or the thumb
+ * while one is down (product spec §2.1, §3.2). Position lives in one property
+ * rather than being split between `left`/`bottom` and a transform, so the
+ * release animates cleanly and there is only ever one source of truth for it.
+ */
 .joystick__base {
   position: absolute;
-  bottom: 50%;
-  left: 50%;
+  top: 0;
+  left: 0;
   width: var(--joystick-base-size);
   height: var(--joystick-base-size);
   border: 2px solid var(--color-joystick);
   border-radius: 50%;
   opacity: 0.4;
-  /* JoystickView writes left/top on pointerdown to float the stick to the
-     thumb; translate(-50%, -50%) keeps those coordinates centre-relative. */
-  transform: translate(-50%, 50%);
+  /* Opacity always eases; position never does, except on the way home below.
+     A press has to snap to the thumb, and a relayout has to land where the new
+     bands put it without gliding across the screen to get there. */
   transition: opacity 200ms ease-out;
-}
-
-.joystick__base--active {
-  bottom: auto;
-  opacity: 1;
-  transform: translate(-50%, -50%);
+  will-change: transform;
 }
 
 /*
- * On a screen wider than a thumb arc the stick rests bottom-left rather than
- * centred (product spec §2.1). Only the *resting* place moves — pointerdown
- * still floats the base to wherever the thumb lands, anywhere in the band.
- *
- * The inset clears the spec's 16 px safe-area margin (§2.4); `bottom` carries
- * the extra half-diameter because the resting transform translates down 50%.
+ * Let go: the ring fades back to its resting position over 200 ms (spec §3.2).
+ * This is the only state that animates the position, so the class is added on
+ * release and taken off again by the next press or relayout.
  */
-.app[data-tablet='true'][data-orientation='portrait'] .joystick__base:not(.joystick__base--active) {
-  left: calc(var(--joystick-inset) + var(--joystick-base-size) / 2);
-  bottom: calc(var(--joystick-inset) + var(--joystick-base-size) / 2);
+.joystick__base--returning {
+  transition:
+    opacity 200ms ease-out,
+    transform 200ms ease-out;
+}
+
+/* Held: full opacity, tracking the thumb. */
+.joystick__base--active {
+  opacity: 1;
 }
 
 .joystick__knob {
@@ -199,6 +203,64 @@ body {
   transform: translate(-50%, -50%);
   /* Keep the knob on the compositor; it moves every frame while dragging. */
   will-change: transform;
+}
+
+/*
+ * A turn request is buffered and waiting for a legal moment to fire. The ring
+ * clears the instant the simulation consumes it, which is what makes the
+ * pre-turn window legible rather than mysterious (product spec §3.2).
+ */
+.joystick__knob--buffered {
+  box-shadow: 0 0 0 3px var(--color-joystick-buffered);
+}
+
+/* Chevron: the quantised direction, on the ring (product spec §3.2). --------- */
+
+.joystick__chevron {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--joystick-base-size);
+  height: var(--joystick-base-size);
+  opacity: 0;
+  transform: translate(-50%, -50%) rotate(var(--joystick-chevron-angle, 0deg));
+  transition:
+    opacity 120ms ease-out,
+    transform 120ms ease-out;
+  pointer-events: none;
+}
+
+/* Drawn once pointing up; the parent's rotation aims it. */
+.joystick__chevron::before {
+  content: '';
+  position: absolute;
+  top: calc(var(--joystick-base-size) * 0.06);
+  left: 50%;
+  width: calc(var(--joystick-base-size) * 0.11);
+  height: calc(var(--joystick-base-size) * 0.11);
+  border-top: 3px solid var(--color-accent);
+  border-left: 3px solid var(--color-accent);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.joystick__base:not([data-direction='none']) .joystick__chevron {
+  opacity: 1;
+}
+
+.joystick__base[data-direction='up'] {
+  --joystick-chevron-angle: 0deg;
+}
+
+.joystick__base[data-direction='right'] {
+  --joystick-chevron-angle: 90deg;
+}
+
+.joystick__base[data-direction='down'] {
+  --joystick-chevron-angle: 180deg;
+}
+
+.joystick__base[data-direction='left'] {
+  --joystick-chevron-angle: -90deg;
 }
 
 /* Landscape: joystick gutter | maze | HUD, per spec §2.2. --------------- */
@@ -248,6 +310,27 @@ body {
 .app[data-orientation='landscape'] .control-zone {
   grid-area: control;
   height: auto;
+}
+
+/*
+ * Right-handed: mirror the columns, so the gutter the thumb reaches is the one
+ * under it (product spec §2.2, §3.4). The grid areas swap rather than a
+ * `scaleX(-1)` on the container, which would mirror the HUD text too.
+ */
+.app[data-orientation='landscape'][data-handedness='right'] {
+  grid-template-areas:
+    '. stage control'
+    'hud stage control'
+    'status stage control'
+    '. stage control';
+}
+
+.app[data-orientation='landscape'][data-handedness='right'] .hud {
+  align-items: flex-start;
+}
+
+.app[data-orientation='landscape'][data-handedness='right'] .status {
+  justify-content: flex-start;
 }
 
 /* Too-small fallback (spec §5) ---------------------------------------- */
