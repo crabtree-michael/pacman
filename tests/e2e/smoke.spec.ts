@@ -241,6 +241,67 @@ test.describe('skeleton smoke', () => {
     expect(await layerFrame(page, '#layer-overlay')).toBe(playingOverlay);
   });
 
+  test('re-lays out in landscape and keeps the lives visible', async ({ page }, testInfo) => {
+    await page.goto('/');
+    const viewport = testInfo.project.use.viewport!;
+    // Rotate: swap the two dimensions and let the ResizeObserver settle.
+    await page.setViewportSize({ width: viewport.height, height: viewport.width });
+
+    const app = page.locator('#app');
+    await expect(app).toHaveAttribute('data-orientation', 'landscape');
+
+    // Spec §2.2 puts SCORE / LIVES / pause in the right-hand column. Lives were
+    // previously dropped altogether in landscape; they are not optional chrome.
+    await expect(page.locator('[data-hud="lives"]')).toBeVisible();
+    await expect(page.locator('[data-hud="lives"]')).toHaveText('●●●');
+
+    const zone = (await page.locator('#control-zone').boundingBox())!;
+    const board = (await page.locator('#board').boundingBox())!;
+    const hud = (await page.locator('.hud').boundingBox())!;
+
+    // Three columns: joystick gutter, maze, HUD — in that order, not overlapping.
+    expect(zone.x + zone.width).toBeLessThanOrEqual(board.x + 1);
+    expect(board.x + board.width).toBeLessThanOrEqual(hud.x + 1);
+    // The gutter never drops below the spec's 120 px minimum.
+    expect(zone.width).toBeGreaterThanOrEqual(120);
+    // Nothing spills off the bottom.
+    expect(board.y + board.height).toBeLessThanOrEqual(viewport.width + 1);
+  });
+
+  test('rotating back restores the portrait bands', async ({ page }, testInfo) => {
+    await page.goto('/');
+    const viewport = testInfo.project.use.viewport!;
+    const app = page.locator('#app');
+
+    await page.setViewportSize({ width: viewport.height, height: viewport.width });
+    await expect(app).toHaveAttribute('data-orientation', 'landscape');
+    await page.setViewportSize(viewport);
+    await expect(app).toHaveAttribute('data-orientation', 'portrait');
+
+    // A round trip must leave the board fitted, not stuck at its landscape size.
+    const board = (await page.locator('#board').boundingBox())!;
+    expect(board.width).toBeLessThanOrEqual(viewport.width);
+    expect(board.height).toBeLessThanOrEqual(viewport.height);
+    expect(board.width).toBeGreaterThan(0);
+  });
+
+  test('pins the joystick bottom-left on a tablet-width screen', async ({ page }) => {
+    await page.goto('/');
+    // Wider than the spec's 600 px tablet threshold, still portrait.
+    await page.setViewportSize({ width: 768, height: 1024 });
+
+    await expect(page.locator('#app')).toHaveAttribute('data-tablet', 'true');
+
+    const zone = (await page.locator('#control-zone').boundingBox())!;
+    const base = (await page.locator('[data-joystick-base]').boundingBox())!;
+
+    // Resting bottom-left (spec §2.1), not centred on the band.
+    expect(base.x - zone.x).toBeLessThan(zone.width / 4);
+    expect(zone.y + zone.height - (base.y + base.height)).toBeLessThan(zone.height / 4);
+    // Still clear of the screen edge, per the 16 px inset rule in §2.4.
+    expect(base.x - zone.x).toBeGreaterThanOrEqual(16);
+  });
+
   test('loads without console errors', async ({ page }) => {
     const problems: string[] = [];
     page.on('console', (message) => {

@@ -12,6 +12,11 @@ export const CONTROL_ZONE_MIN = 180;
 export const MAZE_MAX_WIDTH = 520;
 /** Below this width the game is unplayable and says so instead of rendering. */
 export const MIN_SUPPORTED_WIDTH = 320;
+/**
+ * At or above this width the screen is wider than a thumb arc, so the joystick
+ * rests in the bottom-left corner rather than centred (product spec §2.1).
+ */
+export const TABLET_MIN_WIDTH = 600;
 
 /** Landscape: margin above and below the maze, and the minimum side gutters. */
 const LANDSCAPE_MARGIN = 12;
@@ -22,6 +27,8 @@ export type Orientation = 'portrait' | 'landscape';
 export interface LayoutMetrics {
   orientation: Orientation;
   tooSmall: boolean;
+  /** Wide enough that the joystick pins to a corner instead of centring. */
+  tablet: boolean;
   mazeWidth: number;
   mazeHeight: number;
   hudHeight: number;
@@ -39,6 +46,7 @@ export function computeLayout(
   const orientation: Orientation =
     availableWidth > availableHeight ? 'landscape' : 'portrait';
   const tooSmall = availableWidth < MIN_SUPPORTED_WIDTH;
+  const tablet = availableWidth >= TABLET_MIN_WIDTH;
   const aspect = cols / rows;
 
   if (orientation === 'landscape') {
@@ -53,9 +61,12 @@ export function computeLayout(
     return {
       orientation,
       tooSmall,
+      tablet,
       mazeWidth: width,
       mazeHeight: height,
       hudHeight: HUD_HEIGHT,
+      // Landscape has no horizontal strip: lives move into the HUD column
+      // alongside the score (product spec §2.2), so the band's height is zero.
       statusHeight: 0,
       controlZone: Math.max(LANDSCAPE_GUTTER_MIN, (availableWidth - width) / 2),
     };
@@ -75,6 +86,7 @@ export function computeLayout(
   return {
     orientation,
     tooSmall,
+    tablet,
     mazeWidth: width,
     mazeHeight: height,
     hudHeight: HUD_HEIGHT,
@@ -95,4 +107,5 @@ export function applyLayout(root: HTMLElement, metrics: LayoutMetrics): void {
   root.style.setProperty('--control-zone', `${metrics.controlZone}px`);
   root.dataset['orientation'] = metrics.orientation;
   root.dataset['tooSmall'] = String(metrics.tooSmall);
+  root.dataset['tablet'] = String(metrics.tablet);
 }

@@ -111,7 +111,8 @@ tests/
   replays/                  Replay driver, digest, recorded streams
   boundary/                 The sim/ isolation rule, enforced
   dom/                      jsdom: the HUD, the loop, the app wiring
-  e2e/                      Playwright: mobile emulation smoke test
+  e2e/                      Playwright: mobile emulation smoke test and the
+                            size/orientation matrix
 ```
 
 Five invariants hold this together, and each has a cost to give up:
@@ -165,7 +166,7 @@ should own that second gesture are `TODO(ui)`.
 | `tests/replays`      | Vitest, Node             | A scripted input stream run headless, hashed to one digest           |
 | `tests/boundary`     | Vitest, Node             | The `sim/` isolation rule                                            |
 | `tests/dom`          | Vitest, jsdom            | The HUD; the loop, on a fake clock; the app's pause and boot wiring   |
-| `tests/e2e`          | Playwright, WebKit + Chromium | Mounting, layout, the render loop, pause and resume, and pointer-driven steering |
+| `tests/e2e`          | Playwright, WebKit + Chromium | Mounting, the render loop, pointer-driven steering, pause and resume, rotation, and a nine-size layout matrix |
 
 Two things about this setup are deliberate.
 
@@ -219,8 +220,9 @@ The type-level half of the same rule is the two-project tsconfig: `src/` gets
 Working: build tooling, the fixed-timestep loop with visibility suspend, the
 game-flow state machine with pause and restart, the three-layer renderer with
 DPR-capped viewport fitting, grid-locked movement with turn buffering and
-tunnel wrap, the floating joystick with dead zone and hysteresis, keyboard
-input, the HUD, and the portrait/landscape layout.
+tunnel wrap, the floating joystick with dead zone and hysteresis (pinned
+bottom-left at tablet widths, per spec §2.1), keyboard input, the HUD, and the
+portrait/landscape layout.
 
 Not built yet, each marked with a `TODO(area)` comment where it belongs:
 
@@ -276,18 +278,22 @@ noted as still manual.
   *(manual — the CI gate from architecture §7 is not built)*
 - The page mounts, fits and runs its loop on Android and iOS emulation, and a
   synthetic drag on the joystick steers Pac-Man, with no console errors
+- Nine sizes spanning the spec's 320x568–1024x1366 support range, in both
+  orientations and on both engines: the maze layer is actually painted, nothing
+  overflows the viewport, and the document never scrolls
+- Rotating to landscape and back re-fits the board rather than leaving it at its
+  previous size
 
-### Known discrepancy
+### Settled: the sizing rule beats the worked examples
 
-The layout implements the sizing rule stated in product spec §2.1, and matches
-the maze dimensions in that section's worked-example table for 390x844,
-430x932 and 768x1024. It does **not** reproduce the table's control-zone
-figures for those rows (it computes 328/372/364 against the table's
-296/358/364), and for 360x640 it grows the maze to 340x376 where the table says
-316x350. The stated rule gives the maze all the height left over above the
-180 px control-zone minimum, which is what the code does; the table's numbers
-imply an additional per-device reservation the rule does not mention. Worth
-settling with the spec owner — the fix is one constant either way.
+The layout implements the sizing rule stated in product spec §2.1 — the maze
+gets all the height left over above the 180 px control-zone minimum. That rule
+disagreed with the control-zone column of the same section's worked-example
+table, which implied a per-device reservation the rule never mentions. The spec
+owner has ruled the written rule authoritative, so the table has been corrected
+to the figures the rule produces (control zones of 180/328/372/364 px, and a
+340x376 maze on 360x640). `CONTROL_ZONE_MIN` stays at 180 and the code is
+unchanged.
 
 ## Deployment
 

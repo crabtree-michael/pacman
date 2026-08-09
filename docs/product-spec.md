@@ -81,10 +81,15 @@ interactive, so a stray thumb can never hit a button.
 
 | Device (CSS px) | Maze size | Control zone |
 | --- | --- | --- |
-| 360 × 640 (small Android) | 316 × 350 | 206 px |
-| 390 × 844 (iPhone 14) | 390 × 432 | 296 px |
-| 430 × 932 (iPhone Pro Max) | 430 × 476 | 358 px |
+| 360 × 640 (small Android) | 340 × 376 | 180 px (at the minimum) |
+| 390 × 844 (iPhone 14) | 390 × 432 | 328 px |
+| 430 × 932 (iPhone Pro Max) | 430 × 476 | 372 px |
 | 768 × 1024 (tablet) | 520 × 576 | 364 px, joystick pinned bottom-left |
+
+Each row is the sizing rule applied directly: the maze takes all the height left
+over above the 180 px minimum, so the control zone only exceeds that minimum
+when the maze is capped by width (or by `MAZE_MAX_WIDTH`, as on the tablet).
+Short screens like the 360 × 640 land exactly on the minimum.
 
 On tablets (≥ 600 px wide) the joystick pins to the bottom-left rather than
 centring, because the screen is wider than a thumb arc; a right-handed toggle in
