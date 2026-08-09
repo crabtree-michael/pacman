@@ -245,17 +245,16 @@ noted as still manual.
 - Rotating to landscape and back re-fits the board rather than leaving it at its
   previous size
 
-### Known discrepancy
+### Settled: the sizing rule beats the worked examples
 
-The layout implements the sizing rule stated in product spec §2.1, and matches
-the maze dimensions in that section's worked-example table for 390x844,
-430x932 and 768x1024. It does **not** reproduce the table's control-zone
-figures for those rows (it computes 328/372/364 against the table's
-296/358/364), and for 360x640 it grows the maze to 340x376 where the table says
-316x350. The stated rule gives the maze all the height left over above the
-180 px control-zone minimum, which is what the code does; the table's numbers
-imply an additional per-device reservation the rule does not mention. Worth
-settling with the spec owner — the fix is one constant either way.
+The layout implements the sizing rule stated in product spec §2.1 — the maze
+gets all the height left over above the 180 px control-zone minimum. That rule
+disagreed with the control-zone column of the same section's worked-example
+table, which implied a per-device reservation the rule never mentions. The spec
+owner has ruled the written rule authoritative, so the table has been corrected
+to the figures the rule produces (control zones of 180/328/372/364 px, and a
+340x376 maze on 360x640). `CONTROL_ZONE_MIN` stays at 180 and the code is
+unchanged.
 
 ## Deployment
 
