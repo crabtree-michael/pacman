@@ -129,10 +129,10 @@ describe('InputController', () => {
    */
   it('a still-held stick steers again immediately after a reset', () => {
     const stick = new VirtualJoystick();
+    stick.setOrigin({ x: 100, y: 100 }); // Where the view pins the static ring.
     const controller = new InputController().use(stick);
 
-    stick.press({ x: 100, y: 100 });
-    stick.move({ x: 160, y: 100 });
+    stick.press({ x: 160, y: 100 });
     controller.sample(0);
     expect(controller.direction).toBe(Direction.Right);
 
@@ -146,10 +146,10 @@ describe('InputController', () => {
 
   it('a released stick stays cleared after a reset', () => {
     const stick = new VirtualJoystick();
+    stick.setOrigin({ x: 100, y: 100 }); // Where the view pins the static ring.
     const controller = new InputController().use(stick);
 
-    stick.press({ x: 100, y: 100 });
-    stick.move({ x: 160, y: 100 });
+    stick.press({ x: 160, y: 100 });
     controller.sample(0);
     stick.release();
 

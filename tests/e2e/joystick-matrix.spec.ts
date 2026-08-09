@@ -8,7 +8,7 @@ import { startPlay } from './harness';
  * one proves the control inside the bottom band is actually usable there: that
  * the ring never clips its zone however the band is shaped, that the stick
  * steers from any corner of it, and that the feedback the spec asks for —
- * chevron, buffered tint, the animated return — happens in a real browser.
+ * chevron, buffered tint, and a ring that stays put — happens in a real browser.
  *
  * The spec's success criterion is "no clipping or unreachable controls" across
  * 320x568 to 1024x1366, and unreachable is the harder half: a ring that fits
@@ -161,14 +161,15 @@ interface Sample {
 }
 
 /**
- * Record the ring's position every animation frame, to watch it move.
+ * Record the ring's position every animation frame, to prove it never moves.
  *
- * The 200 ms return is transient — polling for it from the test side races the
- * thing it is measuring. Sampling in the page and asserting over the whole
- * trace is deterministic.
+ * Polling from the test side would only catch the moments it happened to look;
+ * a stray frame of movement between two polls is exactly what this has to
+ * catch. Sampling in the page and asserting over the whole trace is
+ * deterministic.
  *
  * This forces layout twice a frame, which is fine for the one test that needs
- * geometry but is not a general-purpose watcher: see `watchTint` for why.
+ * geometry but is not a general-purpose watcher: see `startTintWatch` for why.
  */
 async function startSampling(page: Page, durationMs: number): Promise<void> {
   await page.evaluate((duration) => {
@@ -242,8 +243,8 @@ async function pressAndDrag(
   await page.mouse.move(at.x, at.y);
   await page.mouse.down();
 
-  // The ring floats to the thumb and may be clamped away from it, so the drag
-  // is measured from where the ring actually landed.
+  // The ring is static, so where the thumb landed is irrelevant to the drag:
+  // the offset that counts is the one from the ring's own centre.
   const zone = await rectOf(page, '#control-zone');
   const centre = await baseCentre(page);
   await page.mouse.move(zone.x + centre.x + dx, zone.y + centre.y + dy, { steps: 6 });
@@ -343,7 +344,7 @@ test.describe('joystick feedback', () => {
     await expect(base).toHaveAttribute('data-direction', 'down');
   });
 
-  test('a near-diagonal drag holds the latched axis until it clears the margin', async ({
+  test('a drag in the dead wedge registers nothing until it commits to an axis', async ({
     page,
   }) => {
     await page.goto('/');
@@ -356,13 +357,20 @@ test.describe('joystick feedback', () => {
     await pressAndDrag(page, centre, 40, 0);
     await expect(base).toHaveAttribute('data-direction', 'right');
 
-    // 1.10x the incumbent axis: inside the 15% margin, so it must not flicker.
     const from = await baseCentre(page);
-    await page.mouse.move(zone.x + from.x + 40, zone.y + from.y + 44, { steps: 4 });
+
+    // 45°, dead centre of the wedge between right and down: neither, so the
+    // latch is untouched and Pac-Man carries on rightwards (§3.2).
+    await page.mouse.move(zone.x + from.x + 40, zone.y + from.y + 40, { steps: 4 });
     await expect(base).toHaveAttribute('data-direction', 'right');
 
-    // 1.25x: past the margin, so it switches.
-    await page.mouse.move(zone.x + from.x + 40, zone.y + from.y + 50, { steps: 4 });
+    // 60°: still inside the wedge, and being nearer to down changes nothing —
+    // this is the case the old hysteresis rule would have switched on.
+    await page.mouse.move(zone.x + from.x + 23, zone.y + from.y + 40, { steps: 4 });
+    await expect(base).toHaveAttribute('data-direction', 'right');
+
+    // 76°: inside down's arc at last, so it switches.
+    await page.mouse.move(zone.x + from.x + 10, zone.y + from.y + 40, { steps: 4 });
     await expect(base).toHaveAttribute('data-direction', 'down');
 
     await page.mouse.up();
@@ -399,13 +407,18 @@ test.describe('joystick feedback', () => {
     ).toBe(false);
   });
 
-  test('the ring animates back to rest rather than snapping', async ({ page }) => {
+  test('the ring stays put through a press, a drag and a release', async ({ page }) => {
     await page.goto('/');
     await settled(page);
 
     const zone = await rectOf(page, '#control-zone');
     const rest = await baseCentre(page);
 
+    // Sampling starts before the gesture, so a ring that jumped to the thumb
+    // for even one frame and came back would still be caught (spec §3.2).
+    await startSampling(page, 900);
+
+    // Deliberately nowhere near the ring: a quarter of the way down the band.
     await pressAndDrag(
       page,
       { x: zone.x + zone.width / 2, y: zone.y + zone.height * 0.25 },
@@ -415,22 +428,19 @@ test.describe('joystick feedback', () => {
     const held = await baseCentre(page);
     expect(
       Math.hypot(held.x - rest.x, held.y - rest.y),
-      'the ring never left its resting place',
-    ).toBeGreaterThan(20);
+      'the ring moved to the thumb',
+    ).toBeLessThan(1);
 
-    await startSampling(page, 500);
     await page.mouse.up();
-    const samples = await collectSamples(page, 500);
+    const samples = await collectSamples(page, 900);
 
-    const distance = (s: Sample): number => Math.hypot(s.baseX - rest.x, s.baseY - rest.y);
-    // A 200 ms transition passes through the middle; an instant jump does not.
-    const intermediate = samples.filter((s) => {
-      const d = distance(s);
-      return d > 2 && d < Math.hypot(held.x - rest.x, held.y - rest.y) - 2;
-    });
+    const moved = samples.filter((s) => Math.hypot(s.baseX - rest.x, s.baseY - rest.y) > 1);
+    expect(samples.length, 'nothing was sampled').toBeGreaterThan(0);
+    expect(moved, 'the ring left its place at some point during the gesture').toEqual([]);
 
-    expect(intermediate.length, 'the ring jumped home instead of easing back').toBeGreaterThan(0);
-    expect(distance(samples.at(-1)!), 'the ring never made it home').toBeLessThan(2);
+    // The drag still steered — a ring that never moves is only correct if the
+    // stick behind it works.
+    await expect(page.locator('[data-joystick-base]')).toHaveAttribute('data-direction', 'right');
   });
 });
 

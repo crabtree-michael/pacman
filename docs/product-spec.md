@@ -73,9 +73,9 @@ zone (the thumb rest gets more comfortable rather than the maze getting
 cartoonishly large).
 
 **Control zone.** The whole band is a touch target, not just the joystick
-graphic. The joystick renders centred by default but repositions to wherever the
-thumb first lands within the band (see §3.2). Nothing else in the band is
-interactive, so a stray thumb can never hit a button.
+graphic. The joystick renders centred and stays there; a touch anywhere in the
+band is read as a drag from that fixed centre (see §3.2). Nothing else in the
+band is interactive, so a stray thumb can never hit a button.
 
 **Worked examples**
 
@@ -93,7 +93,7 @@ Short screens like the 360 × 640 land exactly on the minimum.
 
 On tablets (≥ 600 px wide) the joystick pins to the bottom-left rather than
 centring, because the screen is wider than a thumb arc; a right-handed toggle in
-settings mirrors it.
+settings mirrors it. Either way the placement is fixed for the session.
 
 ### 2.2 Landscape (supported, secondary)
 
@@ -149,6 +149,7 @@ four directions does the player want next?"
 | Knob diameter | 56 px | Follows the thumb |
 | Max drag radius | 48 px | Knob clamps at this distance from base centre |
 | Dead zone | 12 px (25% of drag radius) | Inside this, direction intent is unchanged |
+| Angular dead zone | 45° per diagonal | A drag this close to a boundary emits nothing |
 | Re-centre threshold | 8 px | Below this on release, treated as a tap, not a drag |
 | Hit area | Entire control zone | Not limited to the visible ring |
 
@@ -157,25 +158,32 @@ so the control feels the same physical size on a small Android and a Pro Max.
 
 ### 3.2 Behaviour
 
-**Floating placement.** On `pointerdown` anywhere in the control zone, the base
-snaps to the touch point (clamped so the whole ring stays inside the zone) and
-fades to full opacity. This removes the "find the stick first" problem — the
-player's thumb defines the origin. On `pointerup`, the base fades back to its
-resting position over 200 ms.
+**Static placement.** The base is fixed: it sits centred in the control zone
+(bottom-left on tablets, per §2.1) and never moves. On `pointerdown` anywhere in
+the band it fades to full opacity, and on `pointerup` it fades back over 200 ms —
+but its position is a layout constant, so the stick is always where the player
+last saw it and muscle memory carries between grabs. The origin is the ring's
+centre, not the touch point.
 
 **Drag.** While the pointer is down, the knob tracks the pointer, clamped to the
-48 px radius. The vector from base centre to pointer is the raw input.
+48 px radius. The vector from base centre to pointer is the raw input. Because
+the origin is fixed, a touch that lands away from the centre already carries a
+direction — the band behaves like a d-pad whose ring is only the visible hint.
 
 **Dead zone.** If the raw vector's magnitude is under 12 px, no new direction is
 emitted and the previously latched direction persists. This prevents jitter when
 the thumb rests near centre.
 
-**4-way snapping with hysteresis.** Outside the dead zone, the vector maps to
-the nearest of Up/Down/Left/Right by dominant axis. To stop flicker on
-near-diagonal input, a new direction is only latched when the candidate axis
-exceeds the current axis by a **15% margin** (e.g. while moving Left, switching
-to Up requires `|dy| > 1.15 × |dx|`). Once latched, the direction holds until the
-margin is beaten in another direction.
+**4-way snapping with an angular dead zone.** The stick is strictly 4-way: the
+only values it can emit are Up, Down, Left, Right, or nothing. Each direction
+owns a **45° arc centred on its axis** (22.5° either side); the **45° wedge
+straddling each diagonal belongs to no direction at all**. A drag inside a wedge
+is too shallow to read as either neighbour, so it emits nothing and the latched
+direction rides on unchanged, rather than being snapped to whichever neighbour
+happens to be marginally closer. Acceptance arcs and dead wedges therefore split
+the circle in half. This replaces the earlier 15% hysteresis margin: an
+ambiguous push now resolves to "not asking for anything", which cannot flicker,
+so no margin is needed.
 
 **Direction latching (the key touch adaptation).** The emitted direction is
 sticky: it survives the player lifting their thumb. Releasing the joystick does
@@ -195,9 +203,12 @@ the single most important tuning value in the control scheme.
 turns Pac-Man on the spot, with no intersection required.
 
 **Visual feedback.** The knob shows the *raw* thumb position (analogue, smooth)
-while a small chevron on the ring shows the *snapped* direction (quantised).
-Players can therefore see when they are near a snapping boundary. The knob ring
-tints briefly when a turn request is buffered and clears when it is consumed.
+while a small chevron on the ring shows the *latched* direction (quantised).
+Players can therefore see the angle they are actually pushing against the
+direction Pac-Man is actually taking, which is what makes a drag stuck in a dead
+wedge legible: the knob has left centre but the chevron has not followed. The
+knob ring tints briefly when a turn request is buffered and clears when it is
+consumed.
 
 **Haptics.** A 10 ms vibration on each direction change, where
 `navigator.vibrate` is available. Off by default on iOS (unsupported) and

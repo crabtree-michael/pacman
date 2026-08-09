@@ -133,7 +133,7 @@ src/
     director.ts             Events and state in, cues out
   input/
     controller.ts           Arbitration and latching
-    joystick.ts             Dead zone, 4-way snapping, hysteresis (no DOM)
+    joystick.ts             Dead zones, 4-way snapping, latching (no DOM)
     joystick-view.ts        Pointer handlers, placement, CSS transforms
     swipe.ts                Flick-to-steer on the maze
     keyboard.ts             Desktop convenience
@@ -170,7 +170,7 @@ Five invariants hold this together, and each has a cost to give up:
   everywhere; a 120 Hz panel renders twice per tick and blends between the two
   most recent states.
 - **Input is intent, not action.** Pointer handlers only store a raw position.
-  Snapping, dead zone and hysteresis run once per tick, and the result is a
+  Snapping and both dead zones run once per tick, and the result is a
   direction *request* the simulation applies when it becomes legal.
 - **Assets are generated, checked in, and verified against their source.** The
   sprite atlas is built by `tools/` from shape definitions, so a build needs no
@@ -208,7 +208,7 @@ should own that second gesture are `TODO(ui)`.
 | -------------------- | ------------------------ | ------------------------------------------------------------------- |
 | `tests/sim`          | Vitest, Node             | Turn legality, wall stops, turn-buffer expiry, tunnel wrap, the phase machine, the PRNG, pellet collection and the chew stall, the frightened timer and the ghost ladder, ghost contact and the death path, fruit thresholds and expiry, the per-level tuning table, the ghost decision rule and its tie-break, the four targeting rules, scatter/chase scheduling and its reversals, house release and the eyes' journey home |
 | `tests/app`          | Vitest, Node             | Layout bands and viewport fitting, snapshotted over a device matrix  |
-| `tests/input`        | Vitest, Node             | Dead zone, snapping, hysteresis, latching, arbitration, resting placement, gamepad, haptics |
+| `tests/input`        | Vitest, Node             | Dead zones, snapping, latching, arbitration, static placement, gamepad, haptics |
 | `tests/render`       | Vitest, Node             | Every frame name the renderer can ask for, against the atlas that ships; the chomp and death cursors; the wall outline's geometry, on a recording context |
 | `tests/audio`        | Vitest, Node             | Cue synthesis and the sprite's offset map; events to cues; siren tiers and loop precedence; the engine's unlock, cross-fade and mute rules, against a fake Web Audio graph |
 | `tests/tools`        | Vitest, Node             | The PNG encoder, decoded and compared back; the atlas rebuilt and diffed against the one checked in |
@@ -299,8 +299,8 @@ turns, Cruise Elroy, the tunnel crawl, the house's dot counter and its
 no-dots-eaten timeout, and the eyes' 160% journey home to be reassembled and let
 straight back out.
 
-Input is complete to spec §3: the floating joystick with dead zone, 4-way
-snapping and hysteresis; the chevron, buffered-turn tint and 200 ms return that
+Input is complete to spec §3: the static joystick with its radial and angular
+dead zones and strict 4-way snapping; the chevron and buffered-turn tint that
 make its state legible; direction latching across a lifted thumb; swipe, keyboard
 and gamepad sharing the same intent pipeline; haptics; and the handedness and
 large-stick accessibility options. The stick pins to a corner at tablet widths
@@ -412,8 +412,11 @@ noted as still manual.
   leaves the countdown, positions and score exactly as they were
 - Reversal turns on the spot mid-corridor, as the spec requires
 - Two identical runs produce bit-identical state
-- Joystick hysteresis holds at a 1.10x challenge and switches at 1.20x, per the
-  spec's 15% margin, in the maths and again through a real drag in the browser
+- The joystick emits only Up/Down/Left/Right, and nothing at all while the drag
+  sits in the 45 degree wedge around a diagonal, in the maths and again through a
+  real drag in the browser
+- The ring does not move under the thumb: its box is unchanged across a press, a
+  drag and a release
 - The ring stays wholly inside the control zone, and steers, from all four
   corners and the middle of the band, at all nine supported sizes on both
   engines — the spec's "no clipping or unreachable controls" criterion

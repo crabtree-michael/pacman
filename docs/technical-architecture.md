@@ -241,36 +241,41 @@ Pointer/Key/Gamepad events
 - CSS does the heavy lifting for gesture suppression:
   `touch-action: none` on the game surface, `overscroll-behavior: none` on
   `html, body`, `user-select: none`, `-webkit-touch-callout: none`.
-- **Handlers do no math beyond storing the raw pointer position.** Snapping,
-  dead-zone, and hysteresis run once per simulation tick from the stored
-  position. Touch events can fire far more often than 60 Hz on some devices;
-  doing work per-event wastes CPU and produces inconsistent results.
+- **Handlers do no math beyond storing the raw pointer position.** Snapping and
+  both dead zones (radial and angular) run once per simulation tick from the
+  stored position. Touch events can fire far more often than 60 Hz on some
+  devices; doing work per-event wastes CPU and produces inconsistent results.
 
 ### 4.2 Joystick module
 
 ```ts
 class VirtualJoystick implements InputSource {
-  private base: Vec2 | null = null;   // set on pointerdown (floating origin)
+  private origin: Vec2 = ZERO;        // ring centre; a layout constant, re-measured on resize
   private point: Vec2 | null = null;  // current pointer position
   private latched: Direction = Direction.None;
 
   sample(): DirectionIntent | null {
-    if (!this.base || !this.point) return null;      // released → keep latch
-    const v = sub(this.point, this.base);
+    if (!this.point) return null;                    // released → keep latch
+    const v = sub(this.point, this.origin);
     if (length(v) < DEAD_ZONE) return null;
-    const next = snapWithHysteresis(v, this.latched, HYSTERESIS = 1.15);
-    if (next === this.latched) return null;
+    const next = snapToCardinal(v);                  // may be None
+    if (next === Direction.None || next === this.latched) return null;
     this.latched = next;
     return { dir: next, timestamp: now, source: 'joystick' };
   }
 }
 ```
 
-`snapWithHysteresis` picks the dominant axis, but only switches away from the
-currently latched direction when the challenging axis exceeds the incumbent by
-the 15% margin from the product spec. The joystick's *visual* knob position is
-read directly from `point` (analogue, smooth) while the emitted direction is the
-snapped value — the two are deliberately different, per spec §3.2.
+`snapToCardinal` gives each direction a 45° arc centred on its axis and leaves
+the 45° wedge around each diagonal owning nothing, per spec §3.2 — an ambiguous
+push returns `None` and emits no intent, so there is nothing for a hysteresis
+margin to damp. The joystick's *visual* knob position is read directly from
+`point` (analogue, smooth) while the emitted direction is the quantised value —
+the two are deliberately different.
+
+The origin is fixed because the base is: `JoystickView` computes the ring's
+centre with `restPosition` on every layout change and hands it over, which is
+also what keeps `getBoundingClientRect` out of the pointer handlers (§4.4).
 
 The joystick renders as **DOM elements with CSS transforms**, not on the canvas:
 it is compositor-driven, costs zero canvas fill-rate, animates on the GPU, and
@@ -381,7 +386,7 @@ pacman/
 │   │   └── atlas.ts              # frame lookup + drawing helpers
 │   ├── input/
 │   │   ├── controller.ts         # arbitration + latching
-│   │   ├── joystick.ts           # floating stick, dead zone, hysteresis
+│   │   ├── joystick.ts           # static stick, dead zones, 4-way snapping
 │   │   ├── joystick-view.ts      # DOM/CSS rendering of the stick
 │   │   ├── swipe.ts  keyboard.ts  gamepad.ts
 │   ├── audio/
@@ -486,7 +491,7 @@ never run on the simulation's hot path.
 | Scoring / progression | Unit tests for multipliers, extra life, fruit timing, Elroy thresholds. |
 | **Whole-game replays** | Record a stream of `(tick, DirectionIntent)` pairs, run the sim headless, assert a hash of the final state. Catches any accidental behaviour change in one cheap test. This is the payoff for a pure simulation. |
 | Layout | Snapshot the computed `Viewport` for a matrix of viewport sizes and DPRs. |
-| Input | Synthetic pointer sequences asserting emitted direction sequences, including dead-zone and hysteresis edge cases. |
+| Input | Synthetic pointer sequences asserting emitted direction sequences, including radial dead-zone and angular dead-wedge edge cases. |
 | Integration | Playwright smoke test on a mobile emulation profile. |
 | Performance | Manual profiling on a low-end reference device per release; CI bundle-size gate. |
 
@@ -530,7 +535,7 @@ never run on the simulation's hot path.
    sizing) before any gameplay exists.
 2. **Movement** — Pac-Man, grid-locked motion, turn buffering, tunnel. Playable
    with keyboard only.
-3. **Joystick** — floating stick, dead zone, hysteresis, latching. This is where
+3. **Joystick** — static stick, dead zone, 4-way snapping, latching. This is where
    the game either feels good or doesn't; budget playtesting time here.
 4. **Pellets and scoring** — collection, HUD, level clear.
 5. **Ghosts** — shared movement engine, then the four targeting rules, then
