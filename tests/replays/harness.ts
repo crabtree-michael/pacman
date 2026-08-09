@@ -1,5 +1,6 @@
 import { STEP_MS } from '../../src/app/loop';
 import { MAZE_CLASSIC } from '../../src/data/maze-classic';
+import { PhaseEvent, applyPhaseEvent } from '../../src/sim/phases';
 import { createInitialState } from '../../src/sim/state';
 import { step } from '../../src/sim/step';
 import { DEFAULT_SEED } from '../../src/sim/rng';
@@ -27,13 +28,25 @@ export interface Replay {
 }
 
 /**
+ * A new game driven through the boot gate to the Ready countdown — the same
+ * place the app lands once its assets resolve, and tick 0 of every replay.
+ */
+export function startedState(seed = DEFAULT_SEED): GameState {
+  const booted = applyPhaseEvent(
+    createInitialState(MAZE_CLASSIC, 1, seed),
+    PhaseEvent.AssetsReady,
+  );
+  return applyPhaseEvent(booted, PhaseEvent.StartRequested);
+}
+
+/**
  * Run a replay to completion and return the final state.
  *
  * The serial counter mirrors `InputController`: it advances only when a *new*
  * intent is latched, which is what lets the 400 ms turn buffer expire.
  */
 export function runReplay(replay: Replay): GameState {
-  let state = createInitialState(MAZE_CLASSIC, 1, replay.seed);
+  let state = startedState(replay.seed);
   let dir: Direction = Direction.None;
   let serial = 0;
   let cursor = 0;
