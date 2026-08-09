@@ -1,0 +1,11 @@
+# Render blueprint — the game is a fully static bundle, no server component.
+services:
+  - type: web
+    name: pacman
+    runtime: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

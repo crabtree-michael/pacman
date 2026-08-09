@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- viewport-fit=cover + the safe-area insets in main.css keep the HUD and
+         joystick clear of notches and home indicators. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#000000" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="description" content="Pac-Man, built for mobile web." />
+    <title>Pac-Man</title>
+  </head>
+  <body>
+    <div id="app">
+      <header id="hud" class="hud">
+        <div class="hud__item">
+          <span class="hud__label">Score</span>
+          <span class="hud__value" data-hud="score">0</span>
+        </div>
+        <div class="hud__item">
+          <span class="hud__label">Lives</span>
+          <span class="hud__value" data-hud="lives">3</span>
+        </div>
+      </header>
+
+      <main id="stage" class="stage">
+        <canvas id="game" class="stage__canvas"></canvas>
+      </main>
+
+      <!-- Touch surface for the virtual joystick. The knob is positioned by
+           Joystick.ts; the zone itself is the whole footer so a thumb landing
+           anywhere in it starts a drag. -->
+      <footer id="joystick" class="joystick" aria-hidden="true">
+        <div class="joystick__base">
+          <div class="joystick__knob"></div>
+        </div>
+      </footer>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

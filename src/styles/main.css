@@ -1,0 +1,160 @@
+:root {
+  --color-bg: #000;
+  --color-wall: #2121de;
+  --color-pacman: #ffcc00;
+  --color-text: #fff;
+  --color-joystick: rgba(255, 255, 255, 0.18);
+  --color-joystick-knob: rgba(255, 255, 255, 0.45);
+
+  --hud-height: 3rem;
+  --joystick-height: 9rem;
+  --joystick-size: 7rem;
+  --joystick-knob-size: 3rem;
+
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Suppress the browser gestures that fight with a game canvas: double-tap
+     zoom, pull-to-refresh, text selection, and the tap highlight flash. */
+  touch-action: none;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  /* dvh tracks the visible viewport as mobile browser chrome collapses. */
+  height: 100dvh;
+  padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+}
+
+/* HUD ---------------------------------------------------------------- */
+
+.hud {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--hud-height);
+  padding: 0 1rem;
+  font-size: 0.875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hud__item {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.hud__label {
+  opacity: 0.6;
+}
+
+.hud__value {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Stage -------------------------------------------------------------- */
+
+.stage {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  /* Without min-height:0 the flex item refuses to shrink below the canvas's
+     intrinsic size and the joystick gets pushed off-screen. */
+  min-height: 0;
+}
+
+.stage__canvas {
+  display: block;
+  /* CanvasRenderer sets the pixel buffer; CSS only bounds the box. */
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* Joystick ----------------------------------------------------------- */
+
+.joystick {
+  position: relative;
+  flex: 0 0 auto;
+  height: var(--joystick-height);
+  touch-action: none;
+}
+
+.joystick__base {
+  position: absolute;
+  bottom: 1rem;
+  left: 50%;
+  width: var(--joystick-size);
+  height: var(--joystick-size);
+  border: 2px solid var(--color-joystick);
+  border-radius: 50%;
+  opacity: 0.5;
+  transform: translateX(-50%);
+  transition: opacity 120ms ease-out;
+}
+
+.joystick__base--active {
+  opacity: 1;
+}
+
+.joystick__knob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--joystick-knob-size);
+  height: var(--joystick-knob-size);
+  background: var(--color-joystick-knob);
+  border-radius: 50%;
+  /* Joystick.ts appends its own translate() for the thumb offset. */
+  transform: translate(-50%, -50%);
+}
+
+/* Landscape: the maze is tall, so give it the height back and float the
+   joystick over the empty column beside it. */
+@media (orientation: landscape) {
+  .joystick {
+    position: absolute;
+    bottom: var(--safe-bottom);
+    left: var(--safe-left);
+    width: 40vw;
+    height: 50dvh;
+  }
+
+  .joystick__base {
+    left: calc(var(--joystick-size) / 2 + 1rem);
+  }
+}
+
+/* Devices without a touchscreen use the keyboard, so hide the joystick. */
+@media (hover: hover) and (pointer: fine) {
+  .joystick {
+    display: none;
+  }
+}
