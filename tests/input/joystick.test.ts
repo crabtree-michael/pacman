@@ -5,7 +5,7 @@ import {
   ANGULAR_DEAD_ZONE_DEG,
   DIRECTION_ARC_HALF_DEG,
   JOYSTICK_DEAD_ZONE_PX,
-  JOYSTICK_MAX_RADIUS_PX,
+  JOYSTICK_TRAVEL_PX,
   VirtualJoystick,
   snapToCardinal,
 } from '../../src/input/joystick';
@@ -116,13 +116,75 @@ describe('VirtualJoystick', () => {
     expect(stick.sample(32)?.dir).toBe(Direction.Down);
   });
 
-  it('clamps the knob to the drag radius', () => {
+  it('stops the knob at the end of its throw, however far the thumb goes', () => {
     const stick = stickAt(0, 0);
     stick.press({ x: 500, y: 0 });
+    expect(stick.knobOffset()).toEqual({ x: stick.travel, y: 0 });
 
-    const offset = stick.knobOffset();
-    expect(offset).not.toBeNull();
-    expect(Math.hypot(offset!.x, offset!.y)).toBeCloseTo(stick.maxRadius, 6);
+    // Twice as far again is still the end of the slot: the gate has no more.
+    stick.move({ x: 1000, y: 0 });
+    expect(stick.knobOffset()).toEqual({ x: stick.travel, y: 0 });
+  });
+
+  it('runs the knob along one axis, never between them', () => {
+    const stick = stickAt(0, 0);
+    // 20° off the axis: still a Right, and the knob shows a Right and nothing
+    // else. The 7px of drift the raw vector carries is not the knob's to show.
+    const { dx, dy } = drag(20);
+    stick.press({ x: dx, y: dy });
+
+    const offset = stick.knobOffset()!;
+    expect(offset.y).toBe(0);
+    expect(offset.x).toBe(stick.travel);
+  });
+
+  it('reports a part-pushed stick as part of the way down its slot', () => {
+    const stick = stickAt(0, 0);
+    stick.press({ x: 20, y: 0 }); // Past the 12px dead zone, short of the throw.
+    expect(stick.knobOffset()).toEqual({ x: 20, y: 0 });
+  });
+
+  it('holds the knob in the latched slot through a dead wedge', () => {
+    const stick = stickAt(0, 0);
+    stick.press({ x: 100, y: 0 });
+    stick.sample(0);
+    expect(stick.knobOffset()).toEqual({ x: stick.travel, y: 0 });
+
+    // A thumb wandering onto the diagonal does not drop the stick out of its
+    // gate; it slackens, because only its Rightward reach still counts.
+    stick.move({ x: 20, y: 20 });
+    expect(stick.sample(16)).toBeNull();
+    expect(stick.knobOffset()).toEqual({ x: 20, y: 0 });
+  });
+
+  it('rests the knob at centre for a wedge drag with nothing latched', () => {
+    const stick = stickAt(0, 0);
+    stick.press({ x: 50, y: 50 }); // A perfect diagonal, and no slot to be in.
+    expect(stick.knobOffset()).toEqual({ x: 0, y: 0 });
+  });
+
+  it('sends the knob home the moment the thumb lifts', () => {
+    const stick = stickAt(0, 0);
+    stick.press({ x: 100, y: 0 });
+    stick.sample(0);
+    expect(stick.knobOffset()).not.toBeNull();
+
+    // Null is the view's cue to animate back to centre. The latch is untouched:
+    // Pac-Man keeps walking while the stick springs back under him.
+    stick.release();
+    expect(stick.knobOffset()).toBeNull();
+    expect(stick.snapped).toBe(Direction.Right);
+  });
+
+  it('measures the raw drag for the view, whatever the knob is doing', () => {
+    const stick = stickAt(0, 0);
+    expect(stick.dragDistance).toBe(0); // Nothing down.
+
+    stick.press({ x: 30, y: 40 });
+    expect(stick.dragDistance).toBe(50); // A drag, though the knob barely moved.
+
+    stick.release();
+    expect(stick.dragDistance).toBe(0);
   });
 
   it('scales the dead zone and radius with the screen', () => {
@@ -152,10 +214,10 @@ describe('VirtualJoystick', () => {
     stick.press({ x: 100, y: 40 });
     stick.sample(0);
 
-    // The chevron shows the quantised direction while the knob shows the raw
-    // thumb position — the two are deliberately different (spec §3.2).
+    // The chevron shows the quantised direction; the knob shows how far up its
+    // slot the thumb has pushed (spec §3.2).
     expect(stick.snapped).toBe(Direction.Up);
-    expect(stick.knobOffset()).not.toEqual({ x: 0, y: 0 });
+    expect(stick.knobOffset()).toEqual({ x: 0, y: -stick.travel });
   });
 
   it('holds the chevron through a dead wedge rather than blanking it', () => {
@@ -201,7 +263,7 @@ describe('accessibility sizing (product spec §3.4)', () => {
     const stick = new VirtualJoystick();
     expect(stick.sizeScale).toBe(1);
     expect(stick.deadZone).toBe(JOYSTICK_DEAD_ZONE_PX);
-    expect(stick.maxRadius).toBe(JOYSTICK_MAX_RADIUS_PX);
+    expect(stick.travel).toBe(JOYSTICK_TRAVEL_PX);
   });
 
   it('enlarges the stick by 1.5x', () => {
@@ -209,7 +271,7 @@ describe('accessibility sizing (product spec §3.4)', () => {
     stick.setAccessible(true);
 
     expect(stick.accessibilityFactor).toBe(ACCESSIBLE_SIZE_FACTOR);
-    expect(stick.maxRadius).toBe(JOYSTICK_MAX_RADIUS_PX * ACCESSIBLE_SIZE_FACTOR);
+    expect(stick.travel).toBe(JOYSTICK_TRAVEL_PX * ACCESSIBLE_SIZE_FACTOR);
   });
 
   it('widens the dead zone by more than the enlargement alone would', () => {
@@ -218,9 +280,11 @@ describe('accessibility sizing (product spec §3.4)', () => {
     stick.setAccessible(true);
 
     expect(stick.deadZone).toBe(proportional * ACCESSIBLE_DEAD_ZONE_FACTOR);
-    // Standard mode spends 25% of the travel on the dead zone; accessible mode
-    // spends more, which is the whole point of widening it separately.
-    expect(stick.deadZone / stick.maxRadius).toBeGreaterThan(0.25);
+    // Standard mode spends a third of the throw on the dead zone; accessible
+    // mode spends more, which is the whole point of widening it separately.
+    expect(stick.deadZone / stick.travel).toBeGreaterThan(
+      JOYSTICK_DEAD_ZONE_PX / JOYSTICK_TRAVEL_PX,
+    );
   });
 
   it('compounds with the screen scale rather than replacing it', () => {

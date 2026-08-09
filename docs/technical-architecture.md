@@ -269,9 +269,13 @@ class VirtualJoystick implements InputSource {
 `snapToCardinal` gives each direction a 45° arc centred on its axis and leaves
 the 45° wedge around each diagonal owning nothing, per spec §3.2 — an ambiguous
 push returns `None` and emits no intent, so there is nothing for a hysteresis
-margin to damp. The joystick's *visual* knob position is read directly from
-`point` (analogue, smooth) while the emitted direction is the quantised value —
-the two are deliberately different.
+margin to damp. The knob is drawn on the same quantisation: `knobOffset`
+projects the drag onto the axis of the direction it reads as — the latched one
+while it sits in a wedge — and clamps it to the 36 px throw, so the stick runs
+in a four-slot gate and cannot promise a diagonal the game will not honour. What
+stays analogue is the distance along the slot, which is what makes a wedge
+legible: the knob hangs back short of the end of its throw while the chevron
+holds. A released stick has no offset, and the CSS eases it home in 120 ms.
 
 The origin is fixed because the base is: `JoystickView` computes the ring's
 centre with `restPosition` on every layout change and hands it over, which is

@@ -250,8 +250,20 @@ body {
   background: var(--color-joystick-knob);
   border-radius: 50%;
   transform: translate(-50%, -50%);
+  /* The spring back to centre on release. Short enough to read as a snap rather
+     than a glide, so the stick is visibly idle before the thumb has left. */
+  transition: transform 120ms ease-out;
   /* Keep the knob on the compositor; it moves every frame while dragging. */
   will-change: transform;
+}
+
+/*
+ * Held: the knob tracks the thumb frame for frame. Easing every write would
+ * drag it a tenth of a second behind the finger, which is exactly the lag the
+ * input path spends its budget avoiding — the ease is only for the trip home.
+ */
+.joystick__base--active .joystick__knob {
+  transition: none;
 }
 
 /*
