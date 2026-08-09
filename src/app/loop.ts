@@ -23,12 +23,20 @@ export interface LoopHooks {
   render(alpha: number): void;
   /** Called when the tab is backgrounded and the loop suspends. */
   onSuspend?(): void;
+  /**
+   * Called when the tab comes back and the loop restarts. The game does not
+   * resume with it — returning shows the pause overlay rather than dropping the
+   * player back into a moving Pac-Man (product spec §4.6).
+   */
+  onResume?(): void;
 }
 
 export class GameLoop {
   private rafId: number | null = null;
   private lastMs = 0;
   private accumulator = 0;
+  /** Whether the *tab* stopped this loop, as opposed to the app. */
+  private suspended = false;
 
   constructor(private readonly hooks: LoopHooks) {
     document.addEventListener('visibilitychange', this.onVisibilityChange);
@@ -39,6 +47,7 @@ export class GameLoop {
   }
 
   start(): void {
+    this.suspended = false;
     if (this.rafId !== null) return;
     this.lastMs = performance.now();
     this.accumulator = 0;
@@ -46,6 +55,7 @@ export class GameLoop {
   }
 
   stop(): void {
+    this.suspended = false;
     if (this.rafId === null) return;
     cancelAnimationFrame(this.rafId);
     this.rafId = null;
@@ -74,13 +84,20 @@ export class GameLoop {
   /**
    * Backgrounding cancels the RAF outright rather than letting it throttle:
    * no background CPU, no battery drain, and no giant delta on return.
+   *
+   * Only a loop this handler stopped is restarted by it. A loop the app stopped
+   * deliberately — or one that has not been started yet — must not spring to
+   * life because the player switched tabs and back.
    */
   private readonly onVisibilityChange = (): void => {
     if (document.hidden) {
+      if (this.rafId === null) return;
       this.stop();
+      this.suspended = true;
       this.hooks.onSuspend?.();
-    } else {
+    } else if (this.suspended) {
       this.start();
+      this.hooks.onResume?.();
     }
   };
 }

@@ -58,7 +58,17 @@ export function opposite(direction: Direction): Direction {
   }
 }
 
+/**
+ * Game-flow states (product spec §4.6, architecture §3.2).
+ *
+ * `Boot` is the loading gate: assets must resolve before the Ready countdown
+ * starts (architecture §5.3), and the spec's flow diagram opens with it. The
+ * architecture's §3.2 list omits it because it lists what the *simulation*
+ * tracks; holding it here rather than in the app keeps the whole flow in one
+ * machine, and gives the overlay a phase to draw a loading card from.
+ */
 export const Phase = {
+  Boot: 'Boot',
   Attract: 'Attract',
   Ready: 'Ready',
   Playing: 'Playing',
@@ -116,12 +126,24 @@ export type GameEvent =
   | { type: 'GhostEaten'; name: GhostName; points: number }
   | { type: 'Death' }
   | { type: 'LevelCleared' }
-  | { type: 'ExtraLife' };
+  | { type: 'ExtraLife' }
+  /**
+   * Emitted by every phase transition. The app reads it to reset the input
+   * latch on respawn, and the audio director will read it for the Ready jingle
+   * (product spec §4.7) — neither needs a callback out of the simulation.
+   */
+  | { type: 'PhaseChanged'; from: Phase; to: Phase };
 
 export interface GameState {
   phase: Phase;
   /** Milliseconds remaining in timed phases. */
   phaseTimer: number;
+  /**
+   * Where `Paused` returns to. Pause suspends the phase underneath it rather
+   * than replacing it, so a countdown paused two seconds in resumes two seconds
+   * in rather than starting over.
+   */
+  resumePhase: Phase;
   level: number;
   score: number;
   lives: number;
