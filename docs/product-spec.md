@@ -150,6 +150,7 @@ four directions does the player want next?"
 | Knob throw | 36 px, `(base − knob) / 2` | Full push, at which the knob sits flush inside the ring |
 | Dead zone | 12 px (a third of the throw) | Inside this, direction intent is unchanged |
 | Angular dead zone | 45° per diagonal | A drag this close to a boundary emits nothing |
+| Decide window | 60 ms | A gesture's *first* direction must read the same throughout it |
 | Re-centre threshold | 8 px | Below this on release, treated as a tap, not a drag |
 | Hit area | Entire control zone | Not limited to the visible ring |
 
@@ -198,6 +199,23 @@ happens to be marginally closer. Acceptance arcs and dead wedges therefore split
 the circle in half. This replaces the earlier 15% hysteresis margin: an
 ambiguous push now resolves to "not asking for anything", which cannot flicker,
 so no margin is needed.
+
+**Deciding, before committing.** The *first* direction of a gesture is not
+taken from the first sample that clears the dead zone. It has to read the same
+on every tick across a **60 ms decide window**; a thumb rolls off its knuckle
+before it travels, so the opening of a swipe meant for Right can point up or
+down, and latching that sent a turn the player never asked for to the buffer
+before the swipe was half done. Three things keep the window from being felt.
+Only the *first* commit of a gesture waits — once the stick has said which way
+it is going, every later change of direction lands on the tick it is read, which
+is where cornering happens. A drag that lifts before the window is out commits
+the direction it was let go on, so a quick stab still steers. And it is the
+latch that waits, not the drawing: the knob is already down its slot within a
+frame, and only the chevron holds until the decision is made.
+
+A drag inside a dead wedge counts as neither agreement nor disagreement — it
+leaves the pending direction standing rather than restarting the window, so a
+thumb that wobbles across a diagonal on its way out still commits.
 
 **Direction latching (the key touch adaptation).** The emitted direction is
 sticky: it survives the player lifting their thumb. Releasing the joystick does

@@ -253,18 +253,36 @@ class VirtualJoystick implements InputSource {
   private origin: Vec2 = ZERO;        // ring centre; a layout constant, re-measured on resize
   private point: Vec2 | null = null;  // current pointer position
   private latched: Direction = Direction.None;
+  private committed = false;          // has this gesture got a direction out yet?
+  private pending = Direction.None;   // what an undecided gesture keeps asking for
+  private pendingSince = 0;
+  private parting = Direction.None;   // what a gesture that lifted early left behind
 
-  sample(): DirectionIntent | null {
-    if (!this.point) return null;                    // released → keep latch
-    const v = sub(this.point, this.origin);
-    if (length(v) < DEAD_ZONE) return null;
-    const next = snapToCardinal(v);                  // may be None
-    if (next === Direction.None || next === this.latched) return null;
-    this.latched = next;
-    return { dir: next, timestamp: now, source: 'joystick' };
+  sample(now: number): DirectionIntent | null {
+    if (!this.point) return this.emit(this.parting, now);  // released → keep latch
+    const next = this.read();                        // dead zone + wedge → None
+    if (next === Direction.None) return null;
+    if (!this.committed && !this.agreed(next, now)) return null;  // decide window
+    this.committed = true;
+    return this.emit(next, now);                     // null unless it is a change
   }
 }
 ```
+
+**The decide window.** The *first* direction of a gesture has to be read on
+every tick across `JOYSTICK_DECIDE_MS` (60 ms) before it is latched; every
+change of direction after that lands on the tick it is read. A thumb rolls off
+its knuckle before it travels, so the opening samples of a swipe can point
+somewhere the player never meant, and latching one of those put a turn the
+player never asked for into the buffer. Agreement over time is what separates a
+gesture that means it from one still forming — waiting a fixed delay and then
+trusting a single sample would only move the misread later. A wedge sample is
+neither agreement nor disagreement: it leaves the pending direction standing, so
+a wobble across a diagonal does not restart the window. A gesture that lifts
+before the window is out commits the direction it was let go on, so a stab at a
+direction still steers. The cost is bounded by construction: at most one window
+per grab of the stick, on the first turn only, and it is the *latch* that waits
+— the knob is drawn from the raw drag and still moves within a frame (§4.4).
 
 `snapToCardinal` gives each direction a 45° arc centred on its axis and leaves
 the 45° wedge around each diagonal owning nothing, per spec §3.2 — an ambiguous

@@ -2,7 +2,8 @@ import { DIRECTION_DELTA, Direction } from '../sim/types';
 import type { DirectionIntent, InputSource } from './controller';
 
 /**
- * Virtual joystick logic — dead zones, angular sectors, 4-way snapping.
+ * Virtual joystick logic — dead zones, angular sectors, 4-way snapping, and the
+ * short window a fresh drag gets to declare itself before it is read.
  *
  * Deliberately free of DOM: `joystick-view.ts` owns the elements and the
  * pointer handlers and only ever pushes raw positions in here. Touch events can
@@ -29,6 +30,35 @@ export const JOYSTICK_KNOB_PX = 56;
 export const JOYSTICK_TRAVEL_PX = (JOYSTICK_BASE_PX - JOYSTICK_KNOB_PX) / 2;
 export const JOYSTICK_DEAD_ZONE_PX = 12;
 export const JOYSTICK_RECENTRE_PX = 8;
+
+/**
+ * How long a fresh drag has to hold still on one direction before the stick
+ * commits to it, in ms (spec §3.2).
+ *
+ * A thumb does not leave the ring along the axis it is aiming for. It rolls
+ * off the knuckle first, so the opening few millimetres of a swipe meant for
+ * Right can point almost anywhere — and reading the direction off the first
+ * sample to clear the dead zone latched that misread, sending a turn the player
+ * never asked for to the buffer before the swipe was half done.
+ *
+ * So the *first* direction of a gesture has to be asked for twice: the same one
+ * on every tick across this window. A transient shorter than it can no longer
+ * reach the simulation, which is the whole of the fix; anything longer is a
+ * player who really did push that way first.
+ *
+ * Deliberately not "wait, then read". Waiting a fixed delay and then trusting a
+ * single sample moves the misread rather than removing it — the reading at the
+ * end of a jab is as wrong as the reading at the start of one. Agreement over
+ * time is the thing that separates a gesture that means it from one still
+ * forming, and it costs nothing extra when the player does mean it.
+ *
+ * At 60 ms it is under the ~100 ms at which a delay stops reading as instant,
+ * an eighth of the 400 ms pre-turn window a request lands in, and long enough
+ * to swallow the roll off a knuckle. Tuning it up buys robustness against
+ * longer misreads and spends first-touch responsiveness; the cost is bounded,
+ * because only the first commit of a gesture ever waits at all.
+ */
+export const JOYSTICK_DECIDE_MS = 60;
 
 /**
  * Width of the dead wedge straddling each diagonal, in degrees. A drag that
@@ -72,6 +102,28 @@ export class VirtualJoystick implements InputSource {
   /** Latest raw pointer position, or null while nothing is touching. */
   private point: Vec2 | null = null;
   private latched: Direction = Direction.None;
+
+  /**
+   * True once the current gesture has got a direction out of the stick. Only
+   * the *first* commit of a gesture waits: once the thumb has said which way it
+   * is going, every later change of mind inside the same drag lands on the tick
+   * it is read. That is where cornering happens, and where a delay would be
+   * the thing players actually feel.
+   */
+  private committed = false;
+  /** The direction an undecided drag has been asking for, and since when. */
+  private pending: Direction = Direction.None;
+  /**
+   * Timed off the ticks rather than the pointer events, so the window shares
+   * the simulation's clock — the one a test can hand over and a paused game
+   * stops, rather than a second clock running underneath it.
+   */
+  private pendingSince = 0;
+  /**
+   * A direction a too-quick gesture left behind: see `release`. Emitted by the
+   * next `sample`, because a released stick has no position left to read.
+   */
+  private parting: Direction = Direction.None;
 
   /** Scales with screen size so the control feels the same physical size. */
   private scale = 1;
@@ -126,8 +178,19 @@ export class VirtualJoystick implements InputSource {
     return this.point !== null;
   }
 
+  /**
+   * A thumb goes down. A gesture starts here, so this is where the stick
+   * forgets having decided anything: every fresh grab is read from scratch,
+   * with no credit for how decisively the last one ended. The window itself
+   * starts on the first tick that reads a direction, which is when there is
+   * finally something to be undecided about.
+   */
   press(point: Vec2): void {
     this.point = point;
+    this.committed = false;
+    this.pending = Direction.None;
+    // A flick left over from the last gesture is deliberately left alone: a
+    // thumb can be back down before the next tick, and that stab still counts.
   }
 
   move(point: Vec2): void {
@@ -137,9 +200,21 @@ export class VirtualJoystick implements InputSource {
   /**
    * Release. The latch is deliberately *not* cleared — Pac-Man carries on in
    * the last direction, exactly as with an arcade stick let go mid-corridor.
+   *
+   * A lift also ends the argument. A flick that came and went inside the decide
+   * window never got to agree with itself, but it is not therefore meaningless:
+   * it is a flick, and the position it was let go from is the last and best
+   * thing it had to say. Dropping those on the floor would have made the window
+   * cost the player a whole class of gesture — the quick stab at a direction —
+   * which is not what it is for.
    */
   release(): void {
+    if (!this.committed) {
+      const parting = this.read();
+      this.parting = parting === Direction.None ? this.pending : parting;
+    }
     this.point = null;
+    this.pending = Direction.None;
   }
 
   /**
@@ -178,15 +253,53 @@ export class VirtualJoystick implements InputSource {
   }
 
   sample(nowMs: number): DirectionIntent | null {
-    if (!this.point) return null; // Released: keep the latch.
+    if (!this.point) return this.emit(this.parting, nowMs); // Released: keep the latch.
 
+    // None means the drag is in the slack around centre or in a dead wedge:
+    // either way it is not asking for anything this tick, and the latched
+    // direction rides on untouched. It is not a denial either — a wedge crossed
+    // mid-window leaves a pending direction standing rather than restarting it,
+    // because "Right, then briefly nothing, then Right" is a thumb pushing
+    // right, not a thumb changing its mind.
+    const next = this.read();
+    if (next === Direction.None) return null;
+
+    if (!this.committed && !this.agreed(next, nowMs)) return null;
+    this.committed = true;
+
+    return this.emit(next, nowMs);
+  }
+
+  /**
+   * Has an undecided gesture asked for the same thing long enough to be taken
+   * at its word? The clock starts the first tick a direction is seen and runs
+   * only while that direction keeps being the answer.
+   */
+  private agreed(next: Direction, nowMs: number): boolean {
+    if (next !== this.pending) {
+      this.pending = next;
+      this.pendingSince = nowMs;
+      return false;
+    }
+    return nowMs - this.pendingSince >= JOYSTICK_DECIDE_MS;
+  }
+
+  /** The direction the live drag reads as, or `None` for "nothing to say". */
+  private read(): Direction {
+    if (!this.point) return Direction.None;
     const dx = this.point.x - this.origin.x;
     const dy = this.point.y - this.origin.y;
-    if (Math.hypot(dx, dy) < this.deadZone) return null;
+    if (Math.hypot(dx, dy) < this.deadZone) return Direction.None;
+    return snapToCardinal(dx, dy);
+  }
 
-    const next = snapToCardinal(dx, dy);
-    // None means the drag sits in a dead wedge: no new intent, and the latched
-    // direction rides on untouched.
+  /**
+   * Latch a direction, reporting it only if it is a change — and drop any flick
+   * still waiting to be reported, which by now has either just been reported or
+   * been overtaken by a live drag that got there first.
+   */
+  private emit(next: Direction, nowMs: number): DirectionIntent | null {
+    this.parting = Direction.None;
     if (next === Direction.None || next === this.latched) return null;
 
     this.latched = next;
@@ -198,9 +311,19 @@ export class VirtualJoystick implements InputSource {
    *
    * A thumb that is still down is re-read on the next tick and re-emits, which
    * is the point: only the memory of a *released* stick is stale.
+   *
+   * The decide window is deliberately not re-armed. A held stick has already
+   * agreed with itself — that is how it came to be latched — and making a
+   * respawn spend another 60 ms working out what an unmoved thumb wants would
+   * be a delay with nothing left to weigh up.
+   *
+   * The flick a released stick left behind *is* dropped, though. It is a
+   * request from before the death or the pause, and honouring it is exactly the
+   * respawn-into-a-ghost this method exists to prevent.
    */
   reset(): void {
     this.latched = Direction.None;
+    this.parting = Direction.None;
   }
 
   destroy(): void {

@@ -133,14 +133,18 @@ describe('InputController', () => {
     const controller = new InputController().use(stick);
 
     stick.press({ x: 160, y: 100 });
-    controller.sample(0);
+    // A fresh gesture is read across a short window before it commits, so it
+    // takes a few ticks of a held thumb to get a direction out of the stick at
+    // all (product spec §3.2, and `joystick.test.ts` for the window itself).
+    for (let t = 0; t <= 100; t += 16) controller.sample(t);
     expect(controller.direction).toBe(Direction.Right);
 
     controller.reset();
     expect(controller.direction).toBe(Direction.None);
 
-    // Thumb never moved. The next tick must pick it straight back up.
-    controller.sample(16);
+    // Thumb never moved, and the gesture has already declared itself once, so
+    // the next tick must pick it straight back up.
+    controller.sample(116);
     expect(controller.direction).toBe(Direction.Right);
   });
 

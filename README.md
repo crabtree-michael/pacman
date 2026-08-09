@@ -133,7 +133,7 @@ src/
     director.ts             Events and state in, cues out
   input/
     controller.ts           Arbitration and latching
-    joystick.ts             Dead zones, 4-way snapping, latching (no DOM)
+    joystick.ts             Dead zones, 4-way snapping, the decide window (no DOM)
     joystick-view.ts        Pointer handlers, placement, CSS transforms
     swipe.ts                Flick-to-steer on the maze
     keyboard.ts             Desktop convenience
@@ -170,8 +170,8 @@ Five invariants hold this together, and each has a cost to give up:
   everywhere; a 120 Hz panel renders twice per tick and blends between the two
   most recent states.
 - **Input is intent, not action.** Pointer handlers only store a raw position.
-  Snapping and both dead zones run once per tick, and the result is a
-  direction *request* the simulation applies when it becomes legal.
+  Snapping, both dead zones and the decide window run once per tick, and the
+  result is a direction *request* the simulation applies when it becomes legal.
 - **Assets are generated, checked in, and verified against their source.** The
   sprite atlas is built by `tools/` from shape definitions, so a build needs no
   asset step and a review sees a readable diff — and a test rebuilds it and
@@ -300,8 +300,10 @@ no-dots-eaten timeout, and the eyes' 160% journey home to be reassembled and let
 straight back out.
 
 Input is complete to spec §3: the static joystick with its radial and angular
-dead zones and strict 4-way snapping; the chevron and buffered-turn tint that
-make its state legible; direction latching across a lifted thumb; swipe, keyboard
+dead zones, strict 4-way snapping, and the 60 ms window a fresh gesture has to
+agree with itself in before its first direction is latched; the chevron and
+buffered-turn tint that make its state legible; direction latching across a
+lifted thumb; swipe, keyboard
 and gamepad sharing the same intent pipeline; haptics; and the handedness and
 large-stick accessibility options. The stick pins to a corner at tablet widths
 (§2.1) and mirrors for a right-handed player (§3.4).
@@ -415,6 +417,10 @@ noted as still manual.
 - The joystick emits only Up/Down/Left/Right, and nothing at all while the drag
   sits in the 45 degree wedge around a diagonal, in the maths and again through a
   real drag in the browser
+- A gesture's first direction is latched only once it has read the same across
+  the decide window, so the roll a thumb makes leaving the ring cannot steer;
+  later turns in the same drag, and a flick that lifts inside the window, are
+  not delayed by it
 - The ring does not move under the thumb: its box is unchanged across a press, a
   drag and a release
 - The ring stays wholly inside the control zone, and steers, from all four
