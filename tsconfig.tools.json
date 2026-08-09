@@ -1,0 +1,14 @@
+{
+  // Everything that runs in Node rather than the browser: the test suites and
+  // the build/test configuration.
+  //
+  // A separate project rather than one big `include`, because these files need
+  // Node's globals and `src/` must not have them. The split is the type-level
+  // half of the same rule `tests/boundary` enforces at runtime — the game has
+  // to work in a browser, so nothing shipped may assume a Node API exists.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["vite/client", "node"]
+  },
+  "include": ["tests", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"]
+}

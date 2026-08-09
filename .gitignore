@@ -3,3 +3,9 @@ dist/
 *.local
 .DS_Store
 .vite/
+
+# Playwright output. Reports and traces are per-run artefacts; the specs and
+# the config are the things worth committing.
+test-results/
+playwright-report/
+blob-report/

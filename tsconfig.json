@@ -20,5 +20,9 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["src", "vite.config.ts"]
+  // Application code only. Tests and the build/test configs are Node-side and
+  // get their own project (`tsconfig.tools.json`) — which is what keeps Node
+  // globals out of reach here, so nothing in `src/` can quietly start
+  // depending on a runtime the browser does not have.
+  "include": ["src"]
 }
