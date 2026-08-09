@@ -2,8 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <!-- viewport-fit=cover + the safe-area insets in main.css keep the HUD and
-         joystick clear of notches and home indicators. -->
+    <!-- viewport-fit=cover plus the safe-area insets in main.css keep the HUD
+         and the control zone clear of notches and home indicators. -->
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
@@ -15,30 +15,44 @@
     <title>Pac-Man</title>
   </head>
   <body>
-    <div id="app">
-      <header id="hud" class="hud">
+    <div id="app" class="app">
+      <header class="hud" data-hud-root>
         <div class="hud__item">
-          <span class="hud__label">Score</span>
-          <span class="hud__value" data-hud="score">0</span>
+          <span class="hud__label">1UP</span>
+          <span class="hud__value" data-hud="score">00</span>
         </div>
         <div class="hud__item">
-          <span class="hud__label">Lives</span>
-          <span class="hud__value" data-hud="lives">3</span>
+          <span class="hud__label">High</span>
+          <span class="hud__value" data-hud="high-score">00</span>
         </div>
+        <button class="hud__pause" type="button" data-action="pause" aria-label="Pause">
+          &#9208;
+        </button>
       </header>
 
-      <main id="stage" class="stage">
-        <canvas id="game" class="stage__canvas"></canvas>
+      <!-- Three stacked canvases: the maze redraws once per level, the entity
+           layer every frame, the overlay only when its text changes. -->
+      <main class="stage" id="stage">
+        <div class="stage__board" id="board">
+          <canvas class="stage__layer" id="layer-maze"></canvas>
+          <canvas class="stage__layer" id="layer-entities"></canvas>
+          <canvas class="stage__layer" id="layer-overlay"></canvas>
+        </div>
       </main>
 
-      <!-- Touch surface for the virtual joystick. The knob is positioned by
-           Joystick.ts; the zone itself is the whole footer so a thumb landing
-           anywhere in it starts a drag. -->
-      <footer id="joystick" class="joystick" aria-hidden="true">
-        <div class="joystick__base">
-          <div class="joystick__knob"></div>
+      <div class="status" data-hud-root>
+        <span class="status__lives" data-hud="lives">●●●</span>
+      </div>
+
+      <!-- The whole band is the joystick's hit area. Nothing else in it is
+           interactive, so a stray thumb can never hit a button. -->
+      <footer class="control-zone" id="control-zone">
+        <div class="joystick__base" data-joystick-base>
+          <div class="joystick__knob" data-joystick-knob></div>
         </div>
       </footer>
+
+      <p class="too-small">Screen too small to play — try a wider window.</p>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

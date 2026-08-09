@@ -1,11 +1,22 @@
-# Pac-Man
+# Pac-Man Mobile Web
 
-Pac-Man for mobile web. Portrait-first, touch-controlled, runs as a static
-bundle in the browser — no app store, no backend.
+A mobile-first, touch-controlled Pac-Man for the browser. No install, no
+account, no backend.
 
-This repository currently holds the **skeleton only**: build tooling, the game
-loop, the rendering pipeline, input handling and the responsive layout are in
-place and wired together. Gameplay is not — see [Status](#status).
+This repository currently holds the **skeleton**: build tooling, the fixed-step
+simulation, the layered renderer, the input pipeline and the responsive layout,
+wired together and running. Gameplay is not — see [Status](#status).
+
+## Design documents
+
+- [Product Spec](docs/product-spec.md) — screen layout, joystick interaction,
+  game mechanics, responsiveness and performance expectations.
+- [Technical Architecture](docs/technical-architecture.md) — rendering, game
+  loop, input pipeline, assets, project structure, build and deploy.
+
+Read the product spec first; the architecture doc assumes its requirements. The
+code follows the architecture's §6 structure, and comments cite the section
+they implement.
 
 ## Getting started
 
@@ -16,7 +27,7 @@ npm run dev        # http://localhost:5173
 
 The dev server binds to all interfaces, so you can open it on a phone at
 `http://<your-machine-ip>:5173` — worth doing early and often, since the touch
-controls and the viewport fit are the parts that cannot be judged on a desktop.
+controls and the viewport fit cannot be judged on a desktop.
 
 | Script              | What it does                                |
 | ------------------- | ------------------------------------------- |
@@ -28,75 +39,108 @@ controls and the viewport fit are the parts that cannot be judged on a desktop.
 Arrow keys or WASD work on desktop; on a touchscreen you get the virtual
 joystick.
 
-## Stack
-
-TypeScript, Vite, and a 2D canvas. No UI framework and no game engine: the
-whole app is one canvas plus a couple of DOM elements, so a framework would add
-payload and a render model we would immediately have to work around. Keeping
-the bundle small matters more than usual here — the target is a phone on a
-mobile connection.
-
-## Layout
+## Structure
 
 ```
-index.html            Shell: HUD, canvas stage, joystick zone
 src/
-  main.ts             Entry point — finds the elements, starts the game
-  game/
-    Game.ts           Owns state and wires the pieces together
-    GameLoop.ts       Fixed-timestep loop on requestAnimationFrame
-    constants.ts      Tuning values (speeds, tick rate, colours)
-    types.ts          Direction/vector/tile types shared across modules
-    entities/
-      Actor.ts        Grid movement shared by Pac-Man and the ghosts
-      Pacman.ts       The player
-      Ghost.ts        Ghosts (rendered, not yet driven)
-    maze/
-      Maze.ts         The static board and its tile lookups
-      layout.ts       Placeholder board data
+  main.ts                   Bootstrap: mount layers, wire input, start the loop
+  app/
+    loop.ts                 Fixed-timestep driver, visibility handling
+    layout.ts               Viewport band maths (product spec §2)
+    persistence.ts          localStorage: high score
+  sim/                      Pure, DOM-free (architecture §3)
+    step.ts                 One tick: step(state, input, dt) -> state
+    movement.ts             Grid motion, turn buffering, tunnel wrap
+    state.ts                Initial state and cheap cloning
+    maze.ts                 Tile queries and the pellet bitmap
+    levels.ts               Per-level tuning table
+    rng.ts                  Seeded xorshift32
+    types.ts                GameState and the shared vocabulary
   render/
-    CanvasRenderer.ts Canvas sizing, DPR handling, all drawing
+    renderer.ts             Owns the three layers and the shared viewport
+    viewport.ts             Tile<->pixel transforms, DPR handling
+    maze-layer.ts           Procedural maze, redrawn per level
+    entity-layer.ts         Pellets and actors, per frame, interpolated
+    overlay-layer.ts        READY!/GAME OVER, redrawn on change
   input/
-    InputManager.ts   Collapses every device into one requested direction
-    Joystick.ts       Virtual thumb-stick for touch
-    KeyboardInput.ts  Desktop steering, for development
-  ui/
-    Hud.ts            Score and lives (DOM, not canvas)
-  styles/
-    main.css          Responsive layout, safe-area insets, joystick styling
+    controller.ts           Arbitration and latching
+    joystick.ts             Dead zone, 4-way snapping, hysteresis (no DOM)
+    joystick-view.ts        Pointer handlers and CSS transforms
+    keyboard.ts             Desktop convenience
+  ui/hud.ts                 Score, high score, lives (DOM, not canvas)
+  data/maze-classic.ts      28 x 31 board, 244 collectibles
+  styles/main.css           Bands, safe areas, joystick
 ```
 
-Three seams are worth preserving as gameplay goes in:
+Four invariants hold this together, and each has a cost to give up:
 
-- **The loop knows nothing about the game.** It calls `update(dt)` at a fixed
-  60 Hz and `render(alpha)` once per animation frame, so behaviour is identical
-  on a 60 Hz phone and a 120 Hz one.
-- **The renderer only reads.** It takes a scene and draws it. It also owns the
-  tile-to-pixel scale, so game code works in tile units and never sees a screen
-  size or a device pixel ratio.
-- **Input arrives as intent.** Devices push "the player wants to go left" into
-  `InputManager`; the game polls it once per tick. Adding a control scheme
-  means adding an `InputSource`, and touches nothing else.
+- **The simulation is pure.** `sim/` has no DOM, no timers, and no randomness
+  beyond a seeded PRNG, so `step(state, input, dt)` is reproducible. That is
+  what makes replay tests possible, and what would later make server-side score
+  validation possible. Nothing in `sim/` may import from `render/`, `input/`,
+  or `ui/`.
+- **Positions are integers.** Actors sit at whole sub-tile units (1/256th of a
+  tile), so "exactly at a tile centre" is an exact test rather than an epsilon
+  comparison, and there is no float drift.
+- **The loop is fixed-step, the renderer interpolates.** The sim runs at 60 Hz
+  everywhere; a 120 Hz panel renders twice per tick and blends between the two
+  most recent states.
+- **Input is intent, not action.** Pointer handlers only store a raw position.
+  Snapping, dead zone and hysteresis run once per tick, and the result is a
+  direction *request* the simulation applies when it becomes legal.
 
 ## Status
 
-Working: build and dev tooling, the fixed-timestep loop, canvas fit and
-scaling, grid-aligned movement, the virtual joystick, keyboard input, the HUD,
-and the responsive portrait/landscape layout.
+Working: build tooling, the fixed-timestep loop with visibility suspend, the
+three-layer renderer with DPR-capped viewport fitting, grid-locked movement
+with turn buffering and tunnel wrap, the floating joystick with dead zone and
+hysteresis, keyboard input, the HUD, and the portrait/landscape layout.
 
 Not built yet, each marked with a `TODO(area)` comment where it belongs:
 
-- `TODO(maze)` — the real arcade board, pellets, power pellets, side tunnels
-- `TODO(mechanics)` — pellet collection, scoring, collisions, lives, levels,
-  and movement polish (cornering, per-level speed tables)
-- `TODO(ghosts)` — scatter/chase/frightened modes, targeting, house release
-- `TODO(render)` — pre-rendered maze, interpolation, sprites
+- `TODO(mechanics)` — pellet collection, scoring, collisions, lives, the level
+  table, and cornering
+- `TODO(ghosts)` — the shared movement engine, the four targeting rules,
+  scatter/chase scheduling, house release, and the no-up tiles
+- `TODO(render)` — the sprite atlas, arcade wall shapes, bitmap glyphs
+- `TODO(audio)` — the audio sprite and the event-driven director
+- `TODO(ui)` — attract, pause, game over and intermission screens
 
-The placeholder board is a stand-in with the arcade's 28 x 31 dimensions, so
-proportions are honest even though the walls are not. Ghosts sit inert on their
-spawn tiles.
+Also outstanding from the architecture doc but deferred to their own tickets:
+Vitest/Playwright and the ESLint `sim/` import boundary (testing setup), and
+the PWA service worker and manifest (architecture §8.2, build order step 9).
+
+### Verified
+
+- 244 collectibles (240 pellets + 4 power pellets), matching product spec §4.1;
+  board symmetric, every collectible reachable, tunnel open at both edges
+- 180 s of seeded random steering: no wall clipping, 228 of 300 open tiles
+  reached; tunnel wrap keeps positions in bounds
+- Turn buffer expires at 383 ms against the spec's 400 ms window (one tick of
+  accounting), and a pre-turn is honoured at the next junction
+- Reversal turns on the spot mid-corridor, as the spec requires
+- Two identical runs produce bit-identical state
+- Joystick hysteresis holds at a 1.10x challenge and switches at 1.20x, per the
+  spec's 15% margin
+- Viewport caps DPR at 3 and snaps the tile size to whole device pixels
+- Production bundle is 6.2 kB gzipped, against the architecture's 120 kB budget
+
+### Known discrepancy
+
+The layout implements the sizing rule stated in product spec §2.1, and matches
+the maze dimensions in that section's worked-example table for 390x844,
+430x932 and 768x1024. It does **not** reproduce the table's control-zone
+figures for those rows (it computes 328/372/364 against the table's
+296/358/364), and for 360x640 it grows the maze to 340x376 where the table says
+316x350. The stated rule gives the maze all the height left over above the
+180 px control-zone minimum, which is what the code does; the table's numbers
+imply an additional per-device reservation the rule does not mention. Worth
+settling with the spec owner — the fix is one constant either way.
 
 ## Deployment
 
 `render.yaml` describes the site as a Render static site: `npm run build`,
-publish `dist/`. There is nothing to run server-side.
+publish `dist/`. There is no server component. Architecture §8.1 lists
+Cloudflare Pages, Netlify, Vercel and GitHub Pages as equivalent options and
+does not mention Render; Render is used here because the repository is already
+configured for it via `.amika/config.toml`.
