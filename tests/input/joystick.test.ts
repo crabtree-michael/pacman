@@ -5,8 +5,10 @@ import {
   ACCESSIBLE_SIZE_FACTOR,
   ANGULAR_DEAD_ZONE_DEG,
   DIRECTION_ARC_HALF_DEG,
+  JOYSTICK_BASE_PX,
   JOYSTICK_DEAD_ZONE_PX,
   JOYSTICK_DECIDE_MS,
+  JOYSTICK_HOVER_MARGIN_PX,
   JOYSTICK_TRAVEL_PX,
   VirtualJoystick,
   snapToCardinal,
@@ -477,5 +479,64 @@ describe('accessibility sizing (product spec §3.4)', () => {
     stick.press({ x: 120, y: 100 });
 
     expect(stick.sample(0)).toBeNull();
+  });
+
+  it('grows the area a cursor steers from with the stick', () => {
+    const stick = stickAt();
+    const standard = stick.hoverRadius;
+    stick.setAccessible(true);
+
+    expect(stick.hoverRadius).toBe(standard * ACCESSIBLE_SIZE_FACTOR);
+  });
+});
+
+/**
+ * The area a hovering cursor steers from (product spec §3.3). Geometry only:
+ * whether an event ever reaches it is `joystick-view`'s business, and the media
+ * query that decides whether any of this happens at all is tested there.
+ */
+describe('hover area', () => {
+  it('reaches a knob-radius past the rim of the ring', () => {
+    const stick = stickAt();
+    expect(stick.hoverRadius).toBe(JOYSTICK_BASE_PX / 2 + JOYSTICK_HOVER_MARGIN_PX);
+  });
+
+  it('holds a cursor pushing the stick to its stop and beyond', () => {
+    const stick = stickAt();
+    // Full throw is 36 px out; the rim is at 64. Neither is anywhere near
+    // losing control, which is the point of measuring the area from the rim.
+    expect(stick.withinHoverArea({ x: 100 + JOYSTICK_TRAVEL_PX, y: 100 })).toBe(true);
+    expect(stick.withinHoverArea({ x: 100 + JOYSTICK_BASE_PX / 2, y: 100 })).toBe(true);
+  });
+
+  it('lets go of a cursor that has left it', () => {
+    const stick = stickAt();
+    expect(stick.withinHoverArea({ x: 100 + stick.hoverRadius + 1, y: 100 })).toBe(false);
+    // Diagonally out: the area is a disc, so the corners of its box are outside.
+    expect(stick.withinHoverArea({ x: 100 + stick.hoverRadius, y: 100 + 1 })).toBe(false);
+  });
+
+  it('measures from the ring, wherever the ring has been put', () => {
+    const stick = stickAt(400, 300);
+    expect(stick.withinHoverArea({ x: 400, y: 300 })).toBe(true);
+    expect(stick.withinHoverArea({ x: 100, y: 100 })).toBe(false);
+  });
+});
+
+describe('throwOffset', () => {
+  it('puts the knob at the end of the slot a key is holding', () => {
+    const stick = stickAt();
+    expect(stick.throwOffset(Direction.Up)).toEqual({ x: 0, y: -JOYSTICK_TRAVEL_PX });
+    expect(stick.throwOffset(Direction.Right)).toEqual({ x: JOYSTICK_TRAVEL_PX, y: 0 });
+  });
+
+  it('is nothing at all for no direction, so the knob goes home', () => {
+    expect(stickAt().throwOffset(Direction.None)).toBeNull();
+  });
+
+  it('throws to the enlarged stop in accessible mode', () => {
+    const stick = stickAt();
+    stick.setAccessible(true);
+    expect(stick.throwOffset(Direction.Left)).toEqual({ x: -stick.travel, y: 0 });
   });
 });

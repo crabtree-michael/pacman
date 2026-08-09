@@ -269,9 +269,37 @@ Supported as conveniences, sharing the same direction-request pipeline:
 - **Swipe anywhere on the maze** — a flick of ≥ 24 px emits one direction
   request. Useful for players who dislike joysticks.
 - **Arrow keys / WASD** — for desktop and keyboard-equipped tablets.
+- **The cursor, on the joystick** — on a machine with a pointer that can rest
+  somewhere (`hover: hover`), the stick is steered by the cursor being on it,
+  with no button held.
 - **Gamepad D-pad** — via the Gamepad API, best-effort.
 
 Only one input source is "active" at a time; the most recent one wins.
+
+**Steering with a cursor.** The stick reads a hovering cursor exactly as it
+reads a thumb: the vector from the ring's fixed centre, quantised to the same
+four slots, with the same dead zone, the same dead wedges and the same decide
+window. What differs is the area and the grab. A thumb owns the whole band,
+because a touch is a statement of intent wherever it lands; a cursor is only
+ever *somewhere*, so it steers only from a disc reaching **one knob-radius past
+the ring's rim** — near enough to hold a cursor pushing the stick to its stop,
+tight enough that crossing the band on the way elsewhere is not steering. Moving
+into that disc is the grab and moving out of it is the release, with the knob
+springing home and the latched direction riding on, exactly as when a thumb
+lifts. Pressing a button changes nothing except that the drag now owns the
+stick; releasing it hands the stick back to the cursor still resting on it.
+While the cursor is on it the ring wears a brighter rim, because with no button
+held that mark is the only thing saying the mouse is now driving.
+
+**The stick shows whatever is steering.** It is the game's one control, not the
+touch layer's read-out. A held direction key throws the knob to the end of that
+slot — all the way, since a key has no analogue depth to report — and lets it
+spring back to centre on release, the same 120 ms trip a lifted thumb gets. The
+chevron shows the direction the *simulation* was asked for, whichever source
+asked for it, so a keyboard player looking at the ring sees the same answer a
+thumb would have got. A cursor or thumb on the stick outranks a held key for
+the knob, being the finer of the two. The stick is therefore drawn on every
+machine, desktop included.
 
 ### 3.4 Accessibility
 

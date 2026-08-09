@@ -70,10 +70,13 @@ const joystickView = new JoystickView(controlZone, joystick);
 // exactly why a recorded intent stream can stand in for all of them (§4.3).
 const swipe = new SwipeInput(board);
 swipe.setEnabled(settings.swipe);
+// Held on to rather than constructed inline: the stick shows what the keyboard
+// is holding, so the two are wired together below (product spec §3.3).
+const keyboard = new KeyboardInput();
 const controller = new InputController()
   .use(joystick)
   .use(swipe)
-  .use(new KeyboardInput())
+  .use(keyboard)
   .use(new GamepadInput());
 
 const haptics = new Haptics(settings.haptics);
@@ -119,10 +122,16 @@ const view: GameView = {
     }
     renderer.render(previous, current, alpha);
     // The knob is analogue and driven by the pointer, not the simulation, so it
-    // syncs with the frame rather than with the tick. The ring's tint is the
-    // one part read from state: it shows while the simulation is holding a turn
-    // request and clears when it consumes or expires one (product spec §3.2).
-    joystickView.sync(current.pacman.pendingDir !== Direction.None);
+    // syncs with the frame rather than with the tick. The other two are read
+    // from elsewhere: the chevron from the controller's latch, so the ring
+    // shows what the game was asked for whichever source asked, and the tint
+    // from the simulation, so it shows while a turn request is held and clears
+    // when it is consumed or expires (product spec §3.2, §3.3).
+    joystickView.sync({
+      requested: controller.direction,
+      held: keyboard.direction,
+      buffered: current.pacman.pendingDir !== Direction.None,
+    });
   },
 };
 
