@@ -135,13 +135,50 @@ body {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
+  gap: 0.75rem;
   height: var(--status-height);
   padding: 0 1rem;
 }
 
-.status__lives {
-  color: var(--color-accent);
-  letter-spacing: 0.25em;
+.status__lives,
+.status__levels {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/*
+ * The right-hand group takes the slack, so lives stay left and fruit right.
+ * It also wraps: by level 8 the strip is carrying seven fruit, and in
+ * landscape the column it sits in is only as wide as the joystick gutter.
+ */
+.status__levels {
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/*
+ * A life is a Pac-Man, not a dot (product spec §4.5). The wedge is a
+ * conic-gradient rather than an image so it costs no request and stays sharp at
+ * any density; the atlas sprite replaces it with the animated one.
+ */
+.status__life {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 205deg,
+    var(--color-accent) 0deg 310deg,
+    transparent 310deg 360deg
+  );
+}
+
+.status__fruit {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50% 50% 55% 55%;
+  background: var(--fruit-color, var(--color-accent));
 }
 
 /* Control zone ------------------------------------------------------- */
@@ -303,8 +340,14 @@ body {
 .app[data-orientation='landscape'] .status {
   grid-area: status;
   justify-content: flex-end;
+  flex-wrap: wrap;
   /* The band's height is zero in landscape; the content sizes this cell. */
   height: auto;
+}
+
+/* Right-aligned as one group here, rather than pushed to opposite ends. */
+.app[data-orientation='landscape'] .status__levels {
+  margin-left: 0;
 }
 
 .app[data-orientation='landscape'] .control-zone {

@@ -95,6 +95,13 @@ export interface PacmanState extends Actor {
   pendingDir: Direction;
   /** Ticks the pending request has been waiting; expires per the spec's window. */
   pendingAge: number;
+  /**
+   * Ticks of movement owed to chewing (product spec §4.2).
+   *
+   * Eating costs Pac-Man a frame or three of motion. The effect is kept because
+   * it changes ghost-escape maths, not for looks.
+   */
+  stallTicks: number;
 }
 
 export type GhostName = 'blinky' | 'pinky' | 'inky' | 'clyde';
@@ -120,10 +127,37 @@ export interface MazeState {
   remaining: number;
 }
 
+/** The bonus fruit a level offers; which one is a level-table lookup. */
+export type FruitKind =
+  | 'cherry'
+  | 'strawberry'
+  | 'orange'
+  | 'apple'
+  | 'melon'
+  | 'galaxian'
+  | 'bell'
+  | 'key';
+
+/**
+ * The bonus fruit that appears below the ghost house twice a level
+ * (product spec §4.4).
+ */
+export interface FruitState {
+  kind: FruitKind;
+  points: number;
+  /** Tile it sits on — from the maze data, so a second layout can move it. */
+  col: number;
+  row: number;
+  /** Milliseconds before it disappears uneaten. */
+  msRemaining: number;
+}
+
 export type GameEvent =
   | { type: 'PelletEaten'; x: number; y: number }
   | { type: 'PowerPelletEaten'; x: number; y: number }
   | { type: 'GhostEaten'; name: GhostName; points: number }
+  | { type: 'FruitAppeared'; kind: FruitKind }
+  | { type: 'FruitEaten'; kind: FruitKind; points: number }
   | { type: 'Death' }
   | { type: 'LevelCleared' }
   | { type: 'ExtraLife' }
@@ -152,6 +186,14 @@ export interface GameState {
   pacman: PacmanState;
   ghosts: readonly [GhostState, GhostState, GhostState, GhostState];
   fright: { active: boolean; msRemaining: number; ghostsEaten: number };
+  /**
+   * Collectibles eaten on this level. Drives the two fruit appearances
+   * (product spec §4.4) and, when ghosts land, the house dot counters (§4.3).
+   */
+  dotsEaten: number;
+  fruit: FruitState | null;
+  /** How many of the level's two fruit have already been offered. */
+  fruitsShown: number;
   /** Seeded PRNG state — a single uint32, so state stays cheap to clone. */
   rng: number;
   /**

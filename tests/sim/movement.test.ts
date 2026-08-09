@@ -23,6 +23,7 @@ function pacmanAt(col: number, row: number, dir: Direction, speed = 32): PacmanS
     animTicks: 0,
     pendingDir: Direction.None,
     pendingAge: 0,
+    stallTicks: 0,
   };
 }
 

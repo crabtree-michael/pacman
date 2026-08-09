@@ -40,8 +40,11 @@
         </div>
       </main>
 
+      <!-- Lives on the left, the fruit of the levels reached on the right
+           (product spec §2.1). Both are filled in by the HUD. -->
       <div class="status" data-hud-root>
-        <span class="status__lives" data-hud="lives">●●●</span>
+        <span class="status__lives" data-hud="lives"></span>
+        <span class="status__levels" data-hud="levels"></span>
       </div>
 
       <!-- The whole band is the joystick's hit area. Nothing else in it is
