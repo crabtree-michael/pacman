@@ -423,6 +423,8 @@ noted as still manual.
 - The chevron tracks the snapped direction, the knob tints while a turn is
   buffered and clears when the buffer expires, and the ring eases home over
   200 ms rather than jumping
+- The knob stays in its gate: on one axis at a time, stopping inside the ring
+  however far past it the thumb goes, and springing back to centre on release
 - Swipe, keyboard and joystick all reach the simulation through the same
   pipeline; a flick under the 24 px threshold does not, and swiping the maze
   never scrolls the page

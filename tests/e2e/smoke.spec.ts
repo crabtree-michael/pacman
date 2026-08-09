@@ -189,6 +189,61 @@ test.describe('skeleton smoke', () => {
     await expect.poll(transform).toBe(CENTRED);
   });
 
+  test('keeps the knob in its gate: on one axis, inside the ring', async ({ page }) => {
+    await page.goto('/');
+    await startPlay(page);
+    await settledFrame(page);
+
+    const zone = page.locator('#control-zone');
+    const base = page.locator('[data-joystick-base]');
+    const knob = page.locator('[data-joystick-knob]');
+
+    const zoneBox = (await zone.boundingBox())!;
+    const centreX = zoneBox.x + zoneBox.width / 2;
+    const centreY = zoneBox.y + zoneBox.height / 2;
+    const baseBox = (await base.boundingBox())!;
+
+    /** How far the knob's centre sits from the ring's, per axis. */
+    const throwFromCentre = async (): Promise<{ x: number; y: number }> => {
+      const box = (await knob.boundingBox())!;
+      return {
+        x: box.x + box.width / 2 - (baseBox.x + baseBox.width / 2),
+        y: box.y + box.height / 2 - (baseBox.y + baseBox.height / 2),
+      };
+    };
+
+    await page.mouse.move(centreX, centreY);
+    await page.mouse.down();
+
+    // Pushed right, hard. The knob goes right and only right, and it stops with
+    // its edge on the ring rather than hanging outside it.
+    await page.mouse.move(centreX + 200, centreY, { steps: 8 });
+    await expect.poll(async () => (await throwFromCentre()).x).toBeGreaterThan(1);
+
+    const pushed = await throwFromCentre();
+    expect(Math.abs(pushed.y), 'the knob should not leave the horizontal slot').toBeLessThan(1);
+
+    const knobBox = (await knob.boundingBox())!;
+    expect(knobBox.x + knobBox.width, 'the knob should stop inside the ring').toBeLessThanOrEqual(
+      baseBox.x + baseBox.width + 1,
+    );
+
+    // Onto the diagonal: an ambiguous push, so the knob stays in the slot it is
+    // in and only slackens. It must not drift towards the corner.
+    await page.mouse.move(centreX + 20, centreY + 20, { steps: 8 });
+    await expect.poll(async () => (await throwFromCentre()).x).toBeLessThan(pushed.x);
+    expect(Math.abs((await throwFromCentre()).y), 'still on the horizontal slot').toBeLessThan(1);
+
+    // The spring home is eased, but only once the thumb is off: easing the
+    // frames of a live drag would put the knob behind the finger.
+    const transition = (): Promise<string> =>
+      knob.evaluate((node) => getComputedStyle(node).transitionProperty);
+    expect(await transition()).toBe('none');
+
+    await page.mouse.up();
+    await expect.poll(transition).toBe('transform');
+  });
+
   test('steers Pac-Man with a synthetic drag, and the score follows', async ({ page }) => {
     await page.goto('/');
     await startPlay(page);

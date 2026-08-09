@@ -1,4 +1,4 @@
-import { Direction } from '../sim/types';
+import { DIRECTION_DELTA, Direction } from '../sim/types';
 import type { DirectionIntent, InputSource } from './controller';
 
 /**
@@ -13,7 +13,20 @@ import type { DirectionIntent, InputSource } from './controller';
 /** Base geometry in CSS px at scale 1 (product spec §3.1). */
 export const JOYSTICK_BASE_PX = 128;
 export const JOYSTICK_KNOB_PX = 56;
-export const JOYSTICK_MAX_RADIUS_PX = 48;
+/**
+ * How far the knob travels from centre at full throw, in CSS px at scale 1.
+ *
+ * Derived from the two sizes above rather than picked: half the difference is
+ * exactly the distance at which the knob comes to rest flush inside the ring,
+ * so the base contains it at every scale and in accessible mode. A knob that
+ * overhangs its base reads as a puck being dragged around the screen; one that
+ * stops at the rim reads as a stick hitting the end of its slot, which is the
+ * whole of what a gated 4-way stick has to communicate.
+ *
+ * It bounds the *drawing* only. The vector the direction is read from is the
+ * one from the ring's centre to the thumb, however far out that lands (§3.2).
+ */
+export const JOYSTICK_TRAVEL_PX = (JOYSTICK_BASE_PX - JOYSTICK_KNOB_PX) / 2;
 export const JOYSTICK_DEAD_ZONE_PX = 12;
 export const JOYSTICK_RECENTRE_PX = 8;
 
@@ -36,8 +49,8 @@ export const ACCESSIBLE_SIZE_FACTOR = 1.5;
 /**
  * ..."and widens the dead zone", on top of the widening the 1.5x size already
  * brings. The spec lists the two as separate effects, and they are: scaling
- * alone keeps the dead zone at 25% of the drag radius, which is the same
- * steadiness demand on a larger control. This factor takes it to 37.5%, so a
+ * alone keeps the dead zone at a third of the throw, which is the same
+ * steadiness demand on a larger control. This factor takes it to half, so a
  * tremor has somewhere to go before it registers as a turn.
  */
 export const ACCESSIBLE_DEAD_ZONE_FACTOR = 1.5;
@@ -92,8 +105,15 @@ export class VirtualJoystick implements InputSource {
     return JOYSTICK_DEAD_ZONE_PX * this.sizeScale * extra;
   }
 
-  get maxRadius(): number {
-    return JOYSTICK_MAX_RADIUS_PX * this.sizeScale;
+  /** How far the knob may leave centre along its slot, at the current size. */
+  get travel(): number {
+    return JOYSTICK_TRAVEL_PX * this.sizeScale;
+  }
+
+  /** How far the thumb is from the ring's centre, or 0 while nothing is down. */
+  get dragDistance(): number {
+    if (!this.point) return 0;
+    return Math.hypot(this.point.x - this.origin.x, this.point.y - this.origin.y);
   }
 
   /** The quantised direction the ring's chevron shows (product spec §3.2). */
@@ -122,15 +142,39 @@ export class VirtualJoystick implements InputSource {
     this.point = null;
   }
 
-  /** Offset of the knob from the base, clamped to the drag radius. */
+  /**
+   * Where to draw the knob: on one of four slots, never between them, and never
+   * further out than the throw. `null` means "nothing is down" — the view reads
+   * that as the trip home to centre.
+   *
+   * The stick is gated, so the knob moves like one. Letting it sit anywhere in
+   * the ring promised an analogue control that the game then refused to read
+   * diagonally; running it along the axes shows the player the gate they are
+   * actually pushing against. What survives from the raw drag is *how far* along
+   * the slot the thumb has pushed, which is what keeps a dead wedge legible —
+   * the knob hangs back near centre while the chevron holds its direction.
+   *
+   * Choosing the slot: the direction the drag unambiguously asks for, and while
+   * it sits in a dead wedge the latched one. A real stick does not fall back to
+   * centre when a thumb wanders onto a diagonal; it stays in the slot it is in
+   * until the push is clearly for another.
+   */
   knobOffset(): Vec2 | null {
     if (!this.point) return null;
     const dx = this.point.x - this.origin.x;
     const dy = this.point.y - this.origin.y;
-    const distance = Math.hypot(dx, dy);
-    if (distance <= this.maxRadius || distance === 0) return { x: dx, y: dy };
-    const clamp = this.maxRadius / distance;
-    return { x: dx * clamp, y: dy * clamp };
+
+    const cardinal = snapToCardinal(dx, dy);
+    const slot = cardinal === Direction.None ? this.latched : cardinal;
+    if (slot === Direction.None) return { x: 0, y: 0 };
+
+    // The axes are unit vectors, so the dot product is the distance pushed along
+    // the slot. Negative means the drag has crossed behind the gate's centre —
+    // only reachable from a wedge, and the far end of the slot is not where a
+    // stick goes when it is pushed the other way, so it rests at centre.
+    const axis = DIRECTION_DELTA[slot];
+    const pushed = clamp(dx * axis.x + dy * axis.y, 0, this.travel);
+    return { x: axis.x * pushed, y: axis.y * pushed };
   }
 
   sample(nowMs: number): DirectionIntent | null {
@@ -184,4 +228,8 @@ export function snapToCardinal(dx: number, dy: number): Direction {
 
   if (ax >= ay) return dx > 0 ? Direction.Right : Direction.Left;
   return dy > 0 ? Direction.Down : Direction.Up; // y grows downwards on screen.
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
