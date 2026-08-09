@@ -12,6 +12,13 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="description" content="Pac-Man, built for mobile web." />
+    <!-- The PNG first and the SVG second: a browser without SVG favicon
+         support ignores the second link, and one with it prefers the last
+         icon it understands. Both are drawn from the same geometry — see
+         tools/generate-icons.mjs. -->
+    <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <title>Pac-Man</title>
   </head>
   <body>

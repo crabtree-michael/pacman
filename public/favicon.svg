@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Pac-Man">
+  <!-- Kept to two shapes and no detail: at 16 px a tab favicon has ~200 usable
+       pixels, and anything finer than the mouth wedge turns to mush. The wedge
+       is wider than the game's widest chomp frame (entity-layer.ts) for the
+       same reason — it has to read as a mouth, not a nick in the circle. -->
+  <path
+    fill="#ffcc00"
+    d="M32 32 L49.21 7.43 A30 30 0 1 0 49.21 56.57 Z"
+  />
+</svg>
