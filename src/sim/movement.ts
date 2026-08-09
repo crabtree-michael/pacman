@@ -10,11 +10,17 @@ import {
   tileOf,
   type Actor,
   type PacmanState,
+  type Tile,
 } from './types';
 
 /**
  * Grid-locked motion — the routine that defines how the game feels
  * (architecture §3.5, product spec §3.2 and §4.2).
+ *
+ * Pac-Man's half of it is here. Ghosts share the geometry — the same sub-tile
+ * stepping, the same wrap, the same "decide at the centre" rule — but decide
+ * differently enough to live in `ghosts/ghost.ts`, which is where architecture
+ * §3.4 puts them.
  */
 
 /** Turn requests expire after this long if they never become legal. */
@@ -29,8 +35,14 @@ export const PENDING_TTL_MS = 400;
  */
 export const CORNER_TOLERANCE = 0;
 
-/** Distance in sub-units from `pos` to the next tile centre along `sign`. */
-function distanceToCentre(pos: number, sign: number): number {
+/**
+ * Distance in sub-units from `pos` to the next tile centre along `sign`.
+ *
+ * Standing exactly on a centre answers a whole tile rather than zero: the
+ * question is always "how far may I move before the next decision?", and at a
+ * centre the decision has just been made.
+ */
+export function distanceToCentre(pos: number, sign: number): number {
   const offset = (((pos - HALF_TILE) % SUBTILE) + SUBTILE) % SUBTILE;
   if (offset === 0) return SUBTILE;
   return sign > 0 ? SUBTILE - offset : offset;
@@ -48,7 +60,7 @@ export function isTurnLegal(maze: MazeData, actor: Actor, dir: Direction): boole
 }
 
 /** Keep an actor inside the board, wrapping horizontally through the tunnel. */
-function wrapPosition(maze: MazeData, actor: Actor): void {
+export function wrapPosition(maze: MazeData, actor: Actor): void {
   const span = maze.cols * SUBTILE;
   if (actor.x < 0) actor.x += span;
   else if (actor.x >= span) actor.x -= span;
@@ -108,19 +120,7 @@ export function movePacman(maze: MazeData, pacman: PacmanState, stepMs: number):
   pacman.animTicks++;
 }
 
-/**
- * Advance a ghost by one tick.
- *
- * TODO(ghosts): ghosts currently hold position. The shared movement engine
- * lands with the ghost ticket, where at each tile centre a ghost picks the exit
- * minimising straight-line distance to its target tile — never reversing, never
- * turning up on a no-up tile, tie-broken up → left → down → right.
- */
-export function moveGhost(_maze: MazeData, _ghost: Actor, _stepMs: number): void {
-  // Intentionally inert — see the TODO above.
-}
-
 /** Tile currently occupied, tunnel-wrapped. */
-export function actorTile(maze: MazeData, actor: Actor): { col: number; row: number } {
+export function actorTile(maze: MazeData, actor: Actor): Tile {
   return { col: wrapCol(maze, tileOf(actor.x)), row: tileOf(actor.y) };
 }

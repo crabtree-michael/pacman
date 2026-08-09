@@ -3,10 +3,11 @@
 A mobile-first, touch-controlled Pac-Man for the browser. No install, no
 account, no backend.
 
-The game is playable: eat the maze, chase the score, lose your three lives.
-Build tooling, the fixed-step simulation, the game-flow state machine, the
-layered renderer, the touch input pipeline and the responsive layout are all in
-place, with the test harness around them. The ghosts do not chase yet — see
+The game is playable, and the ghosts hunt: eat the maze, chase the score, lose
+your three lives to Blinky, Pinky, Inky and Clyde. Build tooling, the fixed-step
+simulation, the game-flow state machine, the layered renderer, the touch input
+pipeline and the responsive layout are all in place, with the test harness
+around them. What is left is chrome rather than mechanics — see
 [Status](#status).
 
 ## Design documents
@@ -89,7 +90,11 @@ src/
     movement.ts             Grid motion, turn buffering, tunnel wrap
     pacman.ts               Player update: eating, chewing, ghost contact
     scoring.ts              Points, the ghost ladder, the extra life
-    modes.ts                The frightened timer
+    modes.ts                Scatter/chase scheduling and the frightened timer
+    ghosts/
+      ghost.ts              The one movement engine all four ghosts run
+      targeting.ts          Four target tiles: the whole of the personalities
+      house.ts              Release order, the walk out, the eyes' return
     fruit.ts                Bonus fruit: thresholds, clock, collection
     state.ts                Initial state, resets, cheap cloning
     maze.ts                 Tile queries and the pellet bitmap
@@ -170,7 +175,7 @@ should own that second gesture are `TODO(ui)`.
 
 | Layer                | Runner                   | What it covers                                                      |
 | -------------------- | ------------------------ | ------------------------------------------------------------------- |
-| `tests/sim`          | Vitest, Node             | Turn legality, wall stops, turn-buffer expiry, tunnel wrap, the phase machine, the PRNG, pellet collection and the chew stall, the frightened timer and the ghost ladder, ghost contact and the death path, fruit thresholds and expiry, the per-level tuning table |
+| `tests/sim`          | Vitest, Node             | Turn legality, wall stops, turn-buffer expiry, tunnel wrap, the phase machine, the PRNG, pellet collection and the chew stall, the frightened timer and the ghost ladder, ghost contact and the death path, fruit thresholds and expiry, the per-level tuning table, the ghost decision rule and its tie-break, the four targeting rules, scatter/chase scheduling and its reversals, house release and the eyes' journey home |
 | `tests/app`          | Vitest, Node             | Layout bands and viewport fitting, snapshotted over a device matrix  |
 | `tests/input`        | Vitest, Node             | Dead zone, snapping, hysteresis, latching, arbitration, resting placement, gamepad, haptics |
 | `tests/replays`      | Vitest, Node             | A scripted input stream run headless, hashed to one digest           |
@@ -248,6 +253,18 @@ per-level tuning table that clamps at 21 and runs for ever. Contact with a ghost
 costs a life; contact with a frightened one scores. The status strip shows lives
 as Pac-Man wedges and the levels reached as their fruit.
 
+The ghosts are complete to spec §4.3. All four run one movement engine — at each
+tile centre, take the exit that minimises straight-line distance to a target
+tile, never reverse, never turn up on one of the four no-up tiles, ties broken
+up → left → down → right — and the whole of their personality is the target tile
+`sim/ghosts/targeting.ts` hands back: Blinky on your tail, Pinky four ahead with
+the arcade's overflow bug intact, Inky doubling a vector through Blinky, Clyde
+breaking off inside eight tiles. Over the top of that run the global scatter/chase
+cursor with its reversal on every transition, frightened mode's seeded random
+turns, Cruise Elroy, the tunnel crawl, the house's dot counter and its
+no-dots-eaten timeout, and the eyes' 160% journey home to be reassembled and let
+straight back out.
+
 Input is complete to spec §3: the floating joystick with dead zone, 4-way
 snapping and hysteresis; the chevron, buffered-turn tint and 200 ms return that
 make its state legible; direction latching across a lifted thumb; swipe, keyboard
@@ -265,13 +282,10 @@ Not built yet, each marked with a `TODO(area)` comment where it belongs:
 - `TODO(mechanics)` — cornering, the one movement rule left. `CORNER_TOLERANCE`
   is still 0, so turns are taken exactly on the tile centre; the diagonal
   shortcut wants playtesting alongside open question 2 rather than a guess.
-- `TODO(ghosts)` — the shared movement engine, the four targeting rules,
-  scatter/chase scheduling, house release, the eyes' journey home after a ghost
-  is eaten, Cruise Elroy, and the no-up tiles. The tuning table already carries
-  the ghost speeds and both Elroy thresholds, so that ticket reads them rather
-  than inventing them.
 - `TODO(render)` — the sprite atlas, arcade wall shapes, bitmap glyphs, the
-  level-complete maze flash and the score bubble over an eaten ghost
+  level-complete maze flash and the score bubble over an eaten ghost. The
+  one-second freeze that bubble is meant to fill already runs; nothing is drawn
+  in it yet.
 - `TODO(audio)` — the audio sprite and the event-driven director. The event
   queue it consumes is already drained once per tick in `app/game.ts`.
 - `TODO(ui)` — the attract screen, the pause overlay's Resume/Restart/Sound
@@ -283,12 +297,12 @@ Not built yet, each marked with a `TODO(area)` comment where it belongs:
 The test harness is in place — see [Testing](#testing). Still outstanding from
 the architecture doc: the PWA service worker and manifest (§8.2, build order
 step 9), the CI bundle-size gate (§7 — the budget is 120 kB gzipped and the
-bundle is currently 10.9 kB, so nothing enforces it yet), and ESLint, which is
+bundle is currently 12.8 kB, so nothing enforces it yet), and ESLint, which is
 blocked on TypeScript 7 support.
 
-The architecture's §9 row for scoring and progression is covered; ghost
-targeting and cornering still have no code to test, and each lands with its own
-ticket in the directory laid out for it.
+The architecture's §9 rows for scoring, progression and ghost AI are covered;
+cornering is the one behaviour left with no code to test, and it lands with the
+`TODO(mechanics)` ticket above.
 
 ### Verified
 
@@ -311,6 +325,27 @@ noted as still manual.
   expires uneaten after 9.5 s, and does not survive a death or a level change
 - Ghost contact costs a life, freezes, and respawns with the board's remaining
   pellets intact; the last life ends the game
+- 600 ticks of all four ghosts moving: no wall clipping, no ghost ever reverses
+  except when a pellet or a mode transition tells it to, and the same seed walks
+  the same routes twice while a different seed diverges
+- Each targeting rule against hand-worked tiles, including Pinky's up-facing
+  overflow, Inky's doubled vector through Blinky, and Clyde's break for the
+  corner at exactly eight tiles — the rule is "more than eight"
+- All four scatter corners sit outside the walls, so none is ever reached
+- A ghost refuses to turn up on a no-up tile even with its target straight up
+  it, and takes that same turn one tile over where the list does not apply
+- Level 1 scatters for exactly seven seconds and then chases, every transition
+  turns the loose ghosts round, and frightened time stops the cursor rather than
+  running it down — the ghosts come back to whatever it says then
+- Ghost speed follows the level, the tunnel crawl, frightened, eyes and both
+  Elroy stages, and a frightened Blinky is as slow as any other frightened ghost
+- Pinky leaves at once, Inky on the thirtieth dot, Clyde on the sixtieth, in that
+  order; from level 3 the house empties immediately; the no-dots-eaten timeout
+  releases the next one anyway and restarts with each release
+- A ghost emerges above the door facing left in the current global mode, and is
+  not something Pac-Man can run into while it is on its way out
+- Eyes travel home at 160%, ignore the tunnel crawl on the way, drop to the
+  revive spot and come straight back out in play
 - Clearing the board ends the level, and the next one refills it while score,
   lives and the extra-life flag carry over
 - Played in a real browser at 390x844: a scripted run eats its way to the
@@ -341,7 +376,7 @@ noted as still manual.
   pipeline; a flick under the 24 px threshold does not, and swiping the maze
   never scrolls the page
 - Viewport caps DPR at 3 and snaps the tile size to whole device pixels
-- Production bundle is 10.9 kB gzipped, against the architecture's 120 kB budget
+- Production bundle is 12.8 kB gzipped, against the architecture's 120 kB budget
   *(manual — the CI gate from architecture §7 is not built)*
 - The page mounts, fits and runs its loop on Android and iOS emulation, and a
   synthetic drag on the joystick steers Pac-Man, with no console errors

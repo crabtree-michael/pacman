@@ -1,9 +1,18 @@
 import { STEP_MS } from '../../src/app/loop';
 import { MAZE_CLASSIC } from '../../src/data/maze-classic';
+import { createScheduler } from '../../src/sim/modes';
 import { PhaseEvent, applyPhaseEvent } from '../../src/sim/phases';
 import { createInitialState } from '../../src/sim/state';
 import { step } from '../../src/sim/step';
-import { Direction, Phase, tileCentre, type GameState } from '../../src/sim/types';
+import {
+  Direction,
+  Phase,
+  tileCentre,
+  type GameState,
+  type GhostMode,
+  type GhostName,
+  type GhostState,
+} from '../../src/sim/types';
 
 /**
  * Shared scaffolding for the gameplay suites.
@@ -45,8 +54,45 @@ export function playing(level = 1): GameState {
 
   // Jumping straight to a level rather than clearing 244 pellets for each one
   // in between. Speeds and fright duration are read from the table every tick,
-  // so the level number is the whole of what a test needs to set.
-  return level === 1 ? started : { ...started, level };
+  // so the level number covers those; the scatter/chase cursor is the one thing
+  // built once at spawn, so it is rebuilt here to match.
+  if (level === 1) return started;
+  return { ...started, level, modeTimer: createScheduler(level) };
+}
+
+export function ghost(state: GameState, name: GhostName): GhostState {
+  const found = state.ghosts.find((candidate) => candidate.name === name);
+  if (!found) throw new Error(`no ghost named ${name}`);
+  return found;
+}
+
+/** Put a ghost on a tile centre, facing `dir`, in whatever mode a case needs. */
+export function placeGhost(
+  state: GameState,
+  name: GhostName,
+  col: number,
+  row: number,
+  mode: GhostMode,
+  dir: Direction = Direction.Left,
+): GameState {
+  const ghosts = state.ghosts.map((candidate) =>
+    candidate.name === name
+      ? { ...candidate, x: tileCentre(col), y: tileCentre(row), dir, mode }
+      : candidate,
+  ) as unknown as GameState['ghosts'];
+  return { ...state, ghosts };
+}
+
+/**
+ * Hold Pac-Man still while the rest of the game runs.
+ *
+ * The chew stall, held open indefinitely — a mechanic the simulation already
+ * has rather than a test-only switch inside it. Ghost behaviour is much easier
+ * to reason about against a stationary target, and a target that stays put is
+ * one the arcade produces too, every time a player stops moving.
+ */
+export function freezePacman(state: GameState): GameState {
+  return { ...state, pacman: { ...state.pacman, stallTicks: Number.MAX_SAFE_INTEGER } };
 }
 
 /** Move Pac-Man to a tile centre, facing `dir`, with a clean turn buffer. */

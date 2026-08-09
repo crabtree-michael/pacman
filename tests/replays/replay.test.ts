@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { Direction, Phase } from '../../src/sim/types';
-import { LAP_REPLAY, POWER_REPLAY, digest, runReplay } from './harness';
+import { Direction, GhostMode, Phase } from '../../src/sim/types';
+import { HUNT_REPLAY, LAP_REPLAY, POWER_REPLAY, digest, runReplay } from './harness';
 
 /**
  * The determinism guarantee the whole architecture is built on (§1, §3.2, §9).
@@ -14,11 +14,14 @@ describe('whole-game replay', () => {
   it('is bit-identical across runs', () => {
     expect(digest(runReplay(LAP_REPLAY))).toBe(digest(runReplay(LAP_REPLAY)));
     expect(digest(runReplay(POWER_REPLAY))).toBe(digest(runReplay(POWER_REPLAY)));
+    // The one that leans on the PRNG, through the frightened ghosts' coin flip.
+    expect(digest(runReplay(HUNT_REPLAY))).toBe(digest(runReplay(HUNT_REPLAY)));
   });
 
   it('matches the recorded digest', () => {
     expect(digest(runReplay(LAP_REPLAY))).toMatchSnapshot();
     expect(digest(runReplay(POWER_REPLAY))).toMatchSnapshot();
+    expect(digest(runReplay(HUNT_REPLAY))).toMatchSnapshot();
   });
 
   it('is sensitive to the input stream', () => {
@@ -45,6 +48,18 @@ describe('whole-game replay', () => {
     expect(state.dotsEaten).toBe(24);
     expect(state.maze.remaining).toBe(244 - 24);
     expect(state.phase).toBe(Phase.Playing);
+  });
+
+  it('lets the ghosts run the hunt', () => {
+    const state = runReplay(HUNT_REPLAY);
+
+    // Caught once by a ghost that found him on its own, and back on the board
+    // after the respawn — the whole ghost life cycle, in one digest.
+    expect(state.lives).toBe(2);
+    expect(state.phase).toBe(Phase.Playing);
+    expect(state.fright.active).toBe(false);
+    // The house refilled on the respawn and is letting them out again.
+    expect(state.ghosts.map((ghost) => ghost.mode)).toContain(GhostMode.House);
   });
 
   it('ends the power-pellet run mid-fright', () => {

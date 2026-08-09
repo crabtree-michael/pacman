@@ -1,6 +1,8 @@
 import type { MazeData, MazeSpawn } from '../data/maze-classic';
+import { createHouseState } from './ghosts/house';
 import { createMazeState } from './maze';
 import { speedFromPct, tuningForLevel } from './levels';
+import { createScheduler, modeAt } from './modes';
 import { DEFAULT_SEED } from './rng';
 import {
   Direction,
@@ -10,6 +12,7 @@ import {
   type GameState,
   type GhostName,
   type GhostState,
+  type ModeScheduler,
   type PacmanState,
 } from './types';
 
@@ -34,7 +37,18 @@ function spawnPacman(data: MazeData, level: number): PacmanState {
   };
 }
 
-function spawnGhosts(data: MazeData, level: number): GameState['ghosts'] {
+/**
+ * The four ghosts on their spawn tiles.
+ *
+ * Blinky alone starts on the board, in whatever mode the fresh scheduler opens
+ * with; the other three start inside the house and wait for the dot counter
+ * (product spec §4.3).
+ */
+function spawnGhosts(
+  data: MazeData,
+  level: number,
+  scheduler: ModeScheduler,
+): GameState['ghosts'] {
   const speed = speedFromPct(tuningForLevel(level).ghostSpeedPct);
   return GHOST_ORDER.map<GhostState>((name) => ({
     ...spawnAt(data.spawns[name]),
@@ -42,7 +56,7 @@ function spawnGhosts(data: MazeData, level: number): GameState['ghosts'] {
     speed,
     animTicks: 0,
     name,
-    mode: name === 'blinky' ? GhostMode.Scatter : GhostMode.House,
+    mode: name === 'blinky' ? modeAt(scheduler) : GhostMode.House,
   })) as unknown as GameState['ghosts'];
 }
 
@@ -57,6 +71,7 @@ export function createInitialState(
   level = 1,
   seed = DEFAULT_SEED,
 ): GameState {
+  const modeTimer = createScheduler(level);
   return {
     phase: Phase.Boot,
     phaseTimer: 0,
@@ -67,8 +82,11 @@ export function createInitialState(
     extraLifeAwarded: false,
     maze: createMazeState(data),
     pacman: spawnPacman(data, level),
-    ghosts: spawnGhosts(data, level),
+    ghosts: spawnGhosts(data, level, modeTimer),
+    modeTimer,
+    house: createHouseState(),
     fright: { active: false, msRemaining: 0, ghostsEaten: 0 },
+    freezeMs: 0,
     dotsEaten: 0,
     fruit: null,
     fruitsShown: 0,
@@ -86,10 +104,18 @@ export function createInitialState(
  * direction the player still has latched look like a fresh intent, and Pac-Man
  * would respawn already walking (product spec, open question 1). The input
  * controller's own latch is cleared app-side instead.
+ *
+ * The scatter/chase cursor and the house's dot counter go back to the top with
+ * everyone else. A respawn is the arcade's fresh start: seven seconds of
+ * scatter to get out of the corner, and three ghosts that have to be earned
+ * out of the house again.
  */
 export function resetActors(state: GameState): void {
+  state.modeTimer = createScheduler(state.level);
+  state.house = createHouseState();
+  state.freezeMs = 0;
   state.pacman = spawnPacman(state.maze.data, state.level);
-  state.ghosts = spawnGhosts(state.maze.data, state.level);
+  state.ghosts = spawnGhosts(state.maze.data, state.level, state.modeTimer);
   state.fright = { active: false, msRemaining: 0, ghostsEaten: 0 };
   // An uneaten fruit does not survive a death. Its dot count does, so the
   // second fruit still arrives on schedule (product spec §4.4).
@@ -132,6 +158,8 @@ export function cloneState(state: GameState): GameState {
       { ...state.ghosts[2] },
       { ...state.ghosts[3] },
     ],
+    modeTimer: { ...state.modeTimer },
+    house: { ...state.house },
     fright: { ...state.fright },
     fruit: state.fruit === null ? null : { ...state.fruit },
     events: [],

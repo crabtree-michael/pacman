@@ -1,6 +1,7 @@
 import { updateFruit } from './fruit';
-import { updateFright } from './modes';
-import { moveGhost } from './movement';
+import { updateGhosts } from './ghosts/ghost';
+import { updateHouse } from './ghosts/house';
+import { updateFright, updateModes } from './modes';
 import { resolveGhostContact, updatePacman } from './pacman';
 import { cloneState, resetActors, resetGame, startLevel } from './state';
 import { Direction, Phase, type GameState, type InputSnapshot } from './types';
@@ -132,6 +133,18 @@ function countdown(state: GameState, stepMs: number): boolean {
   return true;
 }
 
+/**
+ * Tick the score-bubble freeze. True while the board is still held.
+ *
+ * The same slack `countdown` uses, for the same reason.
+ */
+function freeze(state: GameState, stepMs: number): boolean {
+  if (state.freezeMs <= 0) return false;
+  state.freezeMs -= stepMs;
+  if (state.freezeMs <= stepMs / 1000) state.freezeMs = 0;
+  return true;
+}
+
 const HANDLERS: Readonly<Record<Phase, PhaseHandlers>> = {
   [Phase.Boot]: {
     // Waits for `AssetsReady`. Nothing may move before the atlas has decoded,
@@ -140,8 +153,10 @@ const HANDLERS: Readonly<Record<Phase, PhaseHandlers>> = {
 
   [Phase.Attract]: {
     // TODO(ui): the attract screen runs a demo of the maze behind the title
-    // (product spec §2.3). It is a ghost-AI-driven display, so it lands with
-    // that ticket; until then the phase is inert and the app starts the game.
+    // (product spec §2.3). The ghosts it needs to drive that demo now exist —
+    // what is missing is the title chrome and the TAP TO PLAY target, so it
+    // ships with the rest of the menus. Until then the phase is inert and the
+    // app starts the game itself.
   },
 
   [Phase.Ready]: {
@@ -168,16 +183,22 @@ const HANDLERS: Readonly<Record<Phase, PhaseHandlers>> = {
   [Phase.Playing]: {
     update(state, input, stepMs) {
       applyInput(state, input);
-      // The two clocks tick before anything eats, so a power pellet or a fruit
+      // The score bubble over an eaten ghost stops the world (`pacman.ts`).
+      // Returning before every clock in the game is what makes it a freeze
+      // rather than a pause for the actors only: the frightened timer must not
+      // run down while the player is reading a 400.
+      if (freeze(state, stepMs)) return null;
+
+      // The clocks tick before anything eats, so a power pellet or a fruit
       // taken on this tick gets its full duration rather than 16 ms less — the
       // same "enter now, update next tick" rule the phase clocks follow.
       updateFright(state, stepMs);
+      updateModes(state, stepMs);
       updateFruit(state, stepMs);
+      updateHouse(state, stepMs);
 
       updatePacman(state, stepMs);
-      for (const ghost of state.ghosts) {
-        moveGhost(state.maze.data, ghost, stepMs);
-      }
+      updateGhosts(state);
 
       // Contact is resolved after both sides have moved, so a ghost that walks
       // onto Pac-Man and one Pac-Man walks onto are the same event.

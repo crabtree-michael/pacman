@@ -28,6 +28,28 @@ export function isTunnelRow(maze: MazeData, row: number): boolean {
   return row === maze.tunnelRow;
 }
 
+/** True inside the side tunnel itself, where ghosts crawl (product spec §4.1). */
+export function isTunnelTile(maze: MazeData, col: number, row: number): boolean {
+  if (!isTunnelRow(maze, row)) return false;
+  return col <= maze.tunnelLeft || col >= maze.tunnelRight;
+}
+
+/** One of the four tiles a ghost may not turn upward at (product spec §4.1). */
+export function isNoUpTile(maze: MazeData, col: number, row: number): boolean {
+  return maze.noUpTiles.some((tile) => tile.x === col && tile.y === row);
+}
+
+/**
+ * True inside the ghost house — the room, not its door.
+ *
+ * The tunnel row runs straight through the house, so a column test alone would
+ * call half the tunnel home.
+ */
+export function isInsideHouse(maze: MazeData, col: number, row: number): boolean {
+  const { left, right, top, bottom } = maze.house;
+  return col >= left && col <= right && row >= top && row <= bottom;
+}
+
 /** Build the mutable pellet bitmap from the static layout. */
 export function createMazeState(data: MazeData): MazeState {
   const pellets = new Uint8Array(data.cols * data.rows);

@@ -1,5 +1,7 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`whole-game replay > matches the recorded digest 1`] = `"c87d40c6"`;
+exports[`whole-game replay > matches the recorded digest 1`] = `"2092d995"`;
 
-exports[`whole-game replay > matches the recorded digest 2`] = `"a393761a"`;
+exports[`whole-game replay > matches the recorded digest 2`] = `"23a002aa"`;
+
+exports[`whole-game replay > matches the recorded digest 3`] = `"92115d80"`;
