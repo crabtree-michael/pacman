@@ -159,10 +159,11 @@ four directions does the player want next?"
 | Property | Value | Notes |
 | --- | --- | --- |
 | Base diameter | 128 px | Visual ring, 40% opacity at rest |
-| Knob diameter | 56 px | Follows the thumb |
-| Max drag radius | 48 px | Knob clamps at this distance from base centre |
-| Dead zone | 12 px (25% of drag radius) | Inside this, direction intent is unchanged |
+| Knob diameter | 56 px | Rides its slot, springs back to centre on release |
+| Knob throw | 36 px, `(base − knob) / 2` | Full push, at which the knob sits flush inside the ring |
+| Dead zone | 12 px (a third of the throw) | Inside this, direction intent is unchanged |
 | Angular dead zone | 45° per diagonal | A drag this close to a boundary emits nothing |
+| Decide window | 60 ms | A gesture's *first* direction must read the same throughout it |
 | Re-centre threshold | 8 px | Below this on release, treated as a tap, not a drag |
 | Hit area | Entire control zone | Not limited to the visible ring |
 
@@ -181,10 +182,24 @@ but its position is a layout constant, so the stick is always where the player
 last saw it and muscle memory carries between grabs. The origin is the ring's
 centre, not the touch point.
 
-**Drag.** While the pointer is down, the knob tracks the pointer, clamped to the
-48 px radius. The vector from base centre to pointer is the raw input. Because
-the origin is fixed, a touch that lands away from the centre already carries a
-direction — the band behaves like a d-pad whose ring is only the visible hint.
+**Drag.** The vector from base centre to pointer is the raw input, measured
+wherever in the band the thumb lands or travels to. Because the origin is fixed,
+a touch that lands away from the centre already carries a direction — the band
+behaves like a d-pad whose ring is only the visible hint.
+
+**Gated travel.** The knob does *not* follow the pointer around the ring. The
+stick is 4-way, so it is drawn as a 4-way gate: the knob sits on the Up, Down,
+Left or Right slot of whichever direction the drag reads as, pushed out along
+that slot by however far the thumb has travelled *in that direction*, to a
+maximum of 36 px. While a drag sits in an angular dead wedge the knob holds the
+latched direction's slot rather than dropping to centre, as a real stick resting
+in its gate would. A thumb 300 px away therefore looks exactly like a thumb at
+full throw, which is what it is.
+
+**Spring back.** On release the knob returns to centre over 120 ms. Only the
+knob moves: the base is a layout constant and the latched direction survives
+(below), so the stick going visibly slack is a statement about the thumb, not
+about Pac-Man.
 
 **Dead zone.** If the raw vector's magnitude is under 12 px, no new direction is
 emitted and the previously latched direction persists. This prevents jitter when
@@ -200,6 +215,23 @@ happens to be marginally closer. Acceptance arcs and dead wedges therefore split
 the circle in half. This replaces the earlier 15% hysteresis margin: an
 ambiguous push now resolves to "not asking for anything", which cannot flicker,
 so no margin is needed.
+
+**Deciding, before committing.** The *first* direction of a gesture is not
+taken from the first sample that clears the dead zone. It has to read the same
+on every tick across a **60 ms decide window**; a thumb rolls off its knuckle
+before it travels, so the opening of a swipe meant for Right can point up or
+down, and latching that sent a turn the player never asked for to the buffer
+before the swipe was half done. Three things keep the window from being felt.
+Only the *first* commit of a gesture waits — once the stick has said which way
+it is going, every later change of direction lands on the tick it is read, which
+is where cornering happens. A drag that lifts before the window is out commits
+the direction it was let go on, so a quick stab still steers. And it is the
+latch that waits, not the drawing: the knob is already down its slot within a
+frame, and only the chevron holds until the decision is made.
+
+A drag inside a dead wedge counts as neither agreement nor disagreement — it
+leaves the pending direction standing rather than restarting the window, so a
+thumb that wobbles across a diagonal on its way out still commits.
 
 **Direction latching (the key touch adaptation).** The emitted direction is
 sticky: it survives the player lifting their thumb. Releasing the joystick does
@@ -218,13 +250,13 @@ the single most important tuning value in the control scheme.
 **Reversal is always immediate.** Requesting the direction opposite to travel
 turns Pac-Man on the spot, with no intersection required.
 
-**Visual feedback.** The knob shows the *raw* thumb position (analogue, smooth)
-while a small chevron on the ring shows the *latched* direction (quantised).
-Players can therefore see the angle they are actually pushing against the
-direction Pac-Man is actually taking, which is what makes a drag stuck in a dead
-wedge legible: the knob has left centre but the chevron has not followed. The
-knob ring tints briefly when a turn request is buffered and clears when it is
-consumed.
+**Visual feedback.** The knob shows how hard the stick is being pushed and along
+which slot (smooth, but on one axis at a time) while a small chevron on the ring
+shows the *latched* direction. A drag stuck in a dead wedge stays legible
+because the knob hangs back: pushing diagonally moves it only as far as the
+component along the slot it is already in, so it visibly fails to reach the end
+of its throw while the chevron holds. The knob ring tints briefly when a turn
+request is buffered and clears when it is consumed.
 
 **Haptics.** A 10 ms vibration on each direction change, where
 `navigator.vibrate` is available. Off by default on iOS (unsupported) and

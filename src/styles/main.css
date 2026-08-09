@@ -91,16 +91,24 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.hud__pause {
+.hud__button {
   /* Every tappable target is at least 44 x 44 CSS px (spec §2.4). */
   width: 44px;
   height: 44px;
-  margin-left: auto;
   color: inherit;
   font-size: 1rem;
   background: none;
   border: 0;
   cursor: pointer;
+}
+
+/* The first button in the row takes the slack, pinning both to the right. */
+.hud__button:first-of-type {
+  margin-left: auto;
+}
+
+.hud__button[aria-pressed='false'] {
+  opacity: 0.5;
 }
 
 /* Stage -------------------------------------------------------------- */
@@ -127,6 +135,44 @@ body {
   top: 0;
   left: 0;
   display: block;
+}
+
+/* Pause menu (product spec §2.3) -------------------------------------- */
+
+/*
+ * Shown only while the game is paused, on the phase the view mirrors onto the
+ * app element. `display: none` rather than opacity: an option that is not on
+ * screen must be out of the tab order and out of the accessibility tree too.
+ *
+ * It sits low over the board, clear of the PAUSED card above it and of the
+ * middle, which is where a thumb goes for tap-to-resume.
+ */
+.pause-menu {
+  position: absolute;
+  bottom: 6%;
+  left: 50%;
+  display: none;
+  gap: 0.75rem;
+  transform: translateX(-50%);
+}
+
+.app[data-phase='Paused'] .pause-menu {
+  display: flex;
+}
+
+.pause-menu__button {
+  /* Every tappable target is at least 44 x 44 CSS px (spec §2.4). */
+  min-height: 44px;
+  padding: 0 1.25rem;
+  color: var(--color-accent);
+  font: inherit;
+  font-size: 0.8125rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(0, 0, 0, 0.85);
+  border: 2px solid var(--color-accent);
+  border-radius: 0.5rem;
+  cursor: pointer;
 }
 
 /* Status strip ------------------------------------------------------- */
@@ -179,10 +225,23 @@ body {
 }
 
 .status__fruit {
-  width: 0.7rem;
-  height: 0.7rem;
+  width: 0.9rem;
+  height: 0.9rem;
   border-radius: 50% 50% 55% 55%;
   background: var(--fruit-color, var(--color-accent));
+}
+
+/*
+ * A marker showing real art from the sprite atlas. The CSS stand-in it
+ * replaces is a background of its own, so it has to be cleared rather than
+ * layered under a sprite with transparent corners.
+ */
+.status__icon--art {
+  width: 1.15rem;
+  height: 1.15rem;
+  background-color: transparent;
+  background-repeat: no-repeat;
+  border-radius: 0;
 }
 
 /* Control zone ------------------------------------------------------- */
@@ -230,8 +289,20 @@ body {
   background: var(--color-joystick-knob);
   border-radius: 50%;
   transform: translate(-50%, -50%);
+  /* The spring back to centre on release. Short enough to read as a snap rather
+     than a glide, so the stick is visibly idle before the thumb has left. */
+  transition: transform 120ms ease-out;
   /* Keep the knob on the compositor; it moves every frame while dragging. */
   will-change: transform;
+}
+
+/*
+ * Held: the knob tracks the thumb frame for frame. Easing every write would
+ * drag it a tenth of a second behind the finger, which is exactly the lag the
+ * input path spends its budget avoiding — the ease is only for the trip home.
+ */
+.joystick__base--active .joystick__knob {
+  transition: none;
 }
 
 /*
@@ -374,6 +445,26 @@ body {
   display: none;
 }
 
+/*
+ * The asset-load failure. The characters are drawn from the atlas, so there is
+ * no degraded mode to offer — the honest thing is to say so and let the player
+ * reload.
+ */
+.load-error {
+  position: absolute;
+  inset: auto 1rem 50% 1rem;
+  padding: 1rem;
+  font-size: 0.875rem;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.85);
+  border: 1px solid var(--color-accent);
+  border-radius: 0.5rem;
+}
+
+.load-error[hidden] {
+  display: none;
+}
+
 .app[data-too-small='true'] > *:not(.too-small) {
   display: none;
 }
@@ -386,6 +477,23 @@ body {
   text-align: center;
   align-items: center;
   justify-content: center;
+}
+
+/*
+ * The `?stats` readout. Pinned to the bottom of the control zone, where there
+ * is nothing to overlap and a thumb on the stick will not cover it.
+ */
+.stats {
+  position: absolute;
+  right: 0;
+  bottom: var(--safe-bottom);
+  left: 0;
+  padding: 0.25rem;
+  color: var(--color-accent);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  pointer-events: none;
 }
 
 /* Devices with no touchscreen use the keyboard, so hide the stick. */

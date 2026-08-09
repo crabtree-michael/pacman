@@ -188,11 +188,15 @@ export class JoystickView {
    * Paint one frame of the stick. Called from the render step, not from a
    * pointer handler, so it runs at most once per displayed frame.
    *
-   * Three signals, deliberately different (product spec §3.2): the knob shows
-   * the *raw* thumb position so the player can see how near a snapping boundary
-   * they are, the chevron shows the *quantised* direction that was actually
-   * latched, and the knob's ring tints while a turn request sits buffered and
-   * clears the moment the simulation consumes it.
+   * Three signals, deliberately different (product spec §3.2): the knob runs
+   * along its slot to show how hard the stick is being pushed and which way,
+   * the chevron shows the *quantised* direction that was actually latched, and
+   * the knob's ring tints while a turn request sits buffered and clears the
+   * moment the simulation consumes it.
+   *
+   * A released stick has no offset at all, so the same write that tracks the
+   * thumb is also the one that sends the knob home; the CSS eases it there
+   * because the `--active` class it eased against has just come off.
    */
   sync(turnBuffered: boolean): void {
     const offset = this.joystick.knobOffset();
@@ -268,8 +272,9 @@ export class JoystickView {
     if (event.pointerId !== this.activePointerId) return;
     event.preventDefault();
 
-    const offset = this.joystick.knobOffset();
-    const wasTap = !offset || Math.hypot(offset.x, offset.y) < JOYSTICK_RECENTRE_PX;
+    // Measured on the thumb, not on the knob: a drag that spent its whole life
+    // in a dead wedge barely moved the knob, and it was still a drag.
+    const wasTap = this.joystick.dragDistance < JOYSTICK_RECENTRE_PX;
     // TODO(ui): a tap in the control zone should dismiss the attract screen and
     // unlock audio (product spec §2.3, §3.1). Wired once those screens exist.
     void wasTap;
@@ -278,9 +283,15 @@ export class JoystickView {
   };
 
   /**
-   * Let go: drop the capture and fade the ring back out over 200 ms. It has not
-   * moved, so there is nothing to travel home. The *latch* is untouched —
-   * releasing the stick does not stop Pac-Man (product spec §3.2).
+   * Let go: drop the capture, fade the ring back out over 200 ms and let the
+   * knob spring back to centre under it, the way a sprung stick does. The ring
+   * itself has not moved and does not travel anywhere. The *latch* is untouched
+   * — releasing the stick does not stop Pac-Man (product spec §3.2).
+   *
+   * The sync is what actually sends the knob home, and it has to happen here
+   * rather than waiting for the next rendered frame: a release during a paused
+   * or backgrounded game gets no more frames, and a knob left leaning is the
+   * one thing on screen still claiming a thumb is down.
    */
   private endDrag(pointerId = this.activePointerId): void {
     if (this.activePointerId === null) return;

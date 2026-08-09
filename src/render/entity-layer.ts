@@ -1,9 +1,9 @@
 import { Pellet, pelletAt } from '../sim/maze';
 import { isFrightFlashing } from '../sim/modes';
+import { DYING_MS } from '../sim/phases';
 import {
-  Direction,
-  DIRECTION_DELTA,
   GhostMode,
+  Phase,
   SUBTILE,
   type Actor,
   type FruitState,
@@ -11,55 +11,80 @@ import {
   type GhostState,
   type PacmanState,
 } from '../sim/types';
-import { FRUIT_COLORS } from './palette';
+import {
+  Atlas,
+  CHOMP_PHASES,
+  DEATH_FRAMES,
+  GHOST_PHASES,
+  frameName,
+} from './atlas';
 import { clearTiles, prepareCanvas, type Viewport } from './viewport';
 
 /**
  * The entity layer — everything that moves, redrawn every frame.
  *
- * Pellets live here rather than on the maze layer: they are cheap when batched
- * into one path, and baking them into the maze would force a full maze
- * re-render on every pellet eaten (architecture §2.2).
+ * Characters come from the sprite atlas (architecture §5.1); pellets stay
+ * procedural, because they are two circle sizes and baking them into the maze
+ * layer would force a full maze re-render on every pellet eaten (§2.2).
+ *
+ * Every animation cursor here is derived from a simulation tick count, never
+ * from a frame count. A 120 Hz panel renders each tick twice, and a chomp or a
+ * blink driven by frames would run at double speed on it (product spec §6).
  */
 
-const PACMAN_COLOR = '#ffcc00';
 const PELLET_COLOR = '#ffb897';
+/** The arcade's cyan for the score that appears over an eaten ghost. */
+const BUBBLE_COLOR = '#00ffff';
 
-const GHOST_COLORS: Readonly<Record<string, string>> = {
-  blinky: '#ff0000',
-  pinky: '#ffb8ff',
-  inky: '#00ffff',
-  clyde: '#ffb852',
-};
-
-const FRIGHT_COLOR = '#2121ff';
-const FRIGHT_FLASH_COLOR = '#f8f8f8';
-/** The frightened face — dot eyes and a wavy mouth, on the blue body. */
-const FRIGHT_FACE_COLOR = '#ffb897';
-const EYE_WHITE = '#ffffff';
-const PUPIL_COLOR = '#2121ff';
-
-/** Canvas angle each direction faces. */
-const FACING: Readonly<Record<Direction, number>> = {
-  [Direction.None]: 0,
-  [Direction.Right]: 0,
-  [Direction.Down]: Math.PI / 2,
-  [Direction.Left]: Math.PI,
-  [Direction.Up]: -Math.PI / 2,
-};
-
-/** Ticks per full chomp cycle. */
+/** Ticks per full chomp cycle: open, half, shut, half. */
 const CHOMP_PERIOD = 16;
+/** Ticks per ghost hem frame. */
+const GHOST_ANIM_PERIOD = 8;
+/** Ticks per blue/white alternation while a frightened ghost is expiring. */
+const FLASH_PERIOD = 14;
+/** Ticks per power-pellet blink phase. */
+const BLINK_PERIOD = 16;
+
+/** Pac-Man holds still this long before the death animation starts. */
+const DEATH_HOLD_MS = 400;
+/** Milliseconds each death frame is held for.  11 frames, then an empty board. */
+const DEATH_FRAME_MS = 90;
+
+const BUBBLE_HEIGHT = 0.9;
+
+/** The score bubble over a ghost that was just eaten (product spec §4.4). */
+interface ScoreBubble {
+  x: number;
+  y: number;
+  points: number;
+}
 
 export class EntityLayer {
   private context: CanvasRenderingContext2D | null = null;
+  private atlas: Atlas | null = null;
   private cols = 0;
   private rows = 0;
 
-  constructor(private readonly canvas: HTMLCanvasElement) {}
+  private bubble: ScoreBubble | null = null;
+  /** The state whose events have already been drained into `bubble`. */
+  private lastDrained: GameState | null = null;
+
+  private readonly canvas: HTMLCanvasElement;
+
+  constructor(canvas: HTMLCanvasElement) {
+    this.canvas = canvas;
+  }
+
+  setAtlas(atlas: Atlas): void {
+    this.atlas = atlas;
+  }
 
   resize(viewport: Viewport, cols: number, rows: number): void {
-    this.context = prepareCanvas(this.canvas, viewport);
+    // Smoothing on, unlike the other layers: the atlas stores frames at 4x the
+    // tile size, so a sprite is nearly always drawn *smaller* than its source.
+    // Bilinear downsampling of antialiased art is what keeps the characters
+    // clean; nearest sampling would drop pixels and shimmer as they move.
+    this.context = prepareCanvas(this.canvas, viewport, { smoothing: true });
     this.cols = cols;
     this.rows = rows;
   }
@@ -74,18 +99,62 @@ export class EntityLayer {
     const context = this.context;
     if (!context) return;
 
+    this.drainEvents(current);
+
     clearTiles(context, this.cols, this.rows);
     this.drawPellets(context, current);
-    if (current.fruit) drawFruit(context, current.fruit);
-    for (const [index, ghost] of current.ghosts.entries()) {
-      this.drawGhost(context, previous.ghosts[index] ?? ghost, ghost, alpha, current);
+
+    if (!this.atlas) return;
+
+    if (current.fruit) this.drawFruit(context, current.fruit);
+
+    // The arcade clears the board while Pac-Man dies; so does this, and it is
+    // not only for looks — a ghost left standing on him reads as though the
+    // death had not happened yet.
+    if (current.phase !== Phase.Dying) {
+      for (const [index, ghost] of current.ghosts.entries()) {
+        this.drawGhost(context, previous.ghosts[index] ?? ghost, ghost, alpha, current);
+      }
     }
-    this.drawPacman(context, previous.pacman, current.pacman, alpha);
+
+    this.drawPacman(context, previous.pacman, current.pacman, alpha, current);
+    this.drawBubble(context, current);
+  }
+
+  /**
+   * Latch the score bubble from the simulation's event queue.
+   *
+   * The queue is per-tick and the renderer may draw the same state more than
+   * once — twice on a 120 Hz panel — so events are drained once per *state*,
+   * not once per frame.
+   */
+  private drainEvents(current: GameState): void {
+    if (current !== this.lastDrained) {
+      this.lastDrained = current;
+      for (const event of current.events) {
+        if (event.type !== 'GhostEaten') continue;
+        const ghost = current.ghosts.find((candidate) => candidate.name === event.name);
+        if (!ghost) continue;
+        this.bubble = {
+          x: ghost.x / SUBTILE,
+          y: ghost.y / SUBTILE,
+          points: event.points,
+        };
+      }
+    }
+    // The bubble lives exactly as long as the freeze it was made for, so it
+    // needs no clock of its own and survives a pause without drifting.
+    if (current.freezeMs <= 0) this.bubble = null;
   }
 
   /** All 244 collectibles as a single path — one fill call per frame. */
   private drawPellets(context: CanvasRenderingContext2D, state: GameState): void {
     const { data } = state.maze;
+    // Blinky's cursor is the clock: he is the one actor that never stops while
+    // the board is live, and it is a tick count, so the blink is the same
+    // speed on a 60 and a 120 Hz screen.
+    const powerVisible = Math.floor(state.ghosts[0].animTicks / BLINK_PERIOD) % 2 === 0;
+
     context.fillStyle = PELLET_COLOR;
     context.beginPath();
 
@@ -93,6 +162,7 @@ export class EntityLayer {
       for (let col = 0; col < data.cols; col++) {
         const pellet = pelletAt(state.maze, col, row);
         if (pellet === Pellet.None) continue;
+        if (pellet === Pellet.Power && !powerVisible) continue;
         const radius = pellet === Pellet.Power ? 0.28 : 0.09;
         context.moveTo(col + 0.5 + radius, row + 0.5);
         context.arc(col + 0.5, row + 0.5, radius, 0, Math.PI * 2);
@@ -107,35 +177,23 @@ export class EntityLayer {
     previous: PacmanState,
     current: PacmanState,
     alpha: number,
+    state: GameState,
   ): void {
+    const atlas = this.atlas;
+    if (!atlas) return;
+
+    if (state.phase === Phase.Dying) {
+      const frame = deathFrame(state.phaseTimer);
+      if (frame !== null) {
+        atlas.draw(context, frameName.death(frame), current.x / SUBTILE, current.y / SUBTILE);
+      }
+      return;
+    }
+
     const { x, y } = interpolate(previous, current, alpha, this.cols);
-    const radius = 0.75;
-
-    // Chomp from the animation cursor, so the mouth is frame-rate independent.
-    const phase = (current.animTicks % CHOMP_PERIOD) / CHOMP_PERIOD;
-    const openness = Math.abs(phase * 2 - 1);
-    // Floored, because a wedge of exactly zero is a zero-length arc, and a
-    // zero-length arc draws nothing at all: Pac-Man blinked out of existence
-    // for the one tick in sixteen where the mouth was fully shut, and stayed
-    // gone if he happened to park against a wall on that frame.
-    const halfMouth = Math.max(openness * 0.3 * Math.PI, 0.02);
-    const facing = FACING[current.dir];
-
-    context.fillStyle = PACMAN_COLOR;
-    context.beginPath();
-    context.moveTo(x, y);
-    context.arc(x, y, radius, facing + halfMouth, facing - halfMouth);
-    context.closePath();
-    context.fill();
+    atlas.draw(context, frameName.pacman(current.dir, chompPhase(current.animTicks)), x, y);
   }
 
-  /**
-   * TODO(render): replace with the sprite atlas (architecture §5.1) — the
-   * arcade ghost silhouette needs real art. The three states it has to tell
-   * apart are here already, because they are gameplay: a player has to know at
-   * a glance whether a ghost can be eaten, is about to stop being edible, or is
-   * a pair of eyes that cannot hurt them.
-   */
   private drawGhost(
     context: CanvasRenderingContext2D,
     previous: GhostState,
@@ -143,133 +201,69 @@ export class EntityLayer {
     alpha: number,
     state: GameState,
   ): void {
+    const atlas = this.atlas;
+    if (!atlas) return;
+
     const { x, y } = interpolate(previous, current, alpha, this.cols);
-    const radius = 0.75;
+    const phase = Math.floor(current.animTicks / GHOST_ANIM_PERIOD) % GHOST_PHASES;
 
     // Eaten ghosts are eyes only — no body to draw.
     if (current.mode === GhostMode.Eaten) {
-      drawEyes(context, x, y, radius, current.dir);
+      atlas.draw(context, frameName.eyes(current.dir), x, y);
       return;
     }
 
-    const frightened = current.mode === GhostMode.Frightened;
-    // Colour is never the only signal (product spec §3.4): a frightened ghost
-    // also loses its eyes for dots and gains a wavy skirt, so the state reads
-    // without colour vision, and it flashes before the mode expires.
-    const flashing = frightened && isFrightFlashing(state);
-    context.fillStyle = frightened
-      ? flashing
-        ? FRIGHT_FLASH_COLOR
-        : FRIGHT_COLOR
-      : (GHOST_COLORS[current.name] ?? '#ffffff');
-
-    context.beginPath();
-    context.arc(x, y - radius * 0.15, radius, Math.PI, 0);
-    if (frightened) {
-      appendWavyBase(context, x, y, radius);
-    } else {
-      context.lineTo(x + radius, y + radius * 0.7);
-      context.lineTo(x - radius, y + radius * 0.7);
-    }
-    context.closePath();
-    context.fill();
-
-    if (frightened) {
-      drawFrightFace(context, x, y, radius, flashing);
+    if (current.mode === GhostMode.Frightened) {
+      // Colour is never the only signal (product spec §3.4): the frightened
+      // frames also swap the eyes for dots and gain a wavy mouth, so the state
+      // reads without colour vision. The white flash alternates rather than
+      // holding, which is what makes it read as a warning.
+      const flashing =
+        isFrightFlashing(state) &&
+        Math.floor(current.animTicks / FLASH_PERIOD) % 2 === 1;
+      atlas.draw(context, frameName.fright(phase, flashing), x, y);
       return;
     }
-    drawEyes(context, x, y, radius, current.dir);
+
+    atlas.draw(context, frameName.ghost(current.name, phase), x, y);
+    atlas.draw(context, frameName.eyes(current.dir), x, y);
+  }
+
+  private drawFruit(context: CanvasRenderingContext2D, fruit: FruitState): void {
+    this.atlas?.draw(context, frameName.fruit(fruit.kind), fruit.col + 0.5, fruit.row + 0.5);
+  }
+
+  private drawBubble(context: CanvasRenderingContext2D, state: GameState): void {
+    const bubble = this.bubble;
+    if (!bubble || !this.atlas || state.freezeMs <= 0) return;
+    this.atlas.drawText(context, String(bubble.points), bubble.x, bubble.y - BUBBLE_HEIGHT / 2, {
+      height: BUBBLE_HEIGHT,
+      color: BUBBLE_COLOR,
+      align: 'center',
+    });
   }
 }
 
-/** The zigzag hem that distinguishes a frightened ghost by shape. */
-function appendWavyBase(
-  context: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  radius: number,
-): void {
-  const base = y + radius * 0.7;
-  const peak = base - radius * 0.28;
-  context.lineTo(x + radius, base);
-  for (const offset of [0.66, 0.33, 0, -0.33, -0.66]) {
-    context.lineTo(x + radius * (offset + 0.165), peak);
-    context.lineTo(x + radius * offset, base);
-  }
-  context.lineTo(x - radius, base);
-}
-
-function drawFrightFace(
-  context: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  radius: number,
-  flashing: boolean,
-): void {
-  context.fillStyle = flashing ? FRIGHT_COLOR : FRIGHT_FACE_COLOR;
-  for (const sign of [-1, 1]) {
-    context.beginPath();
-    context.arc(x + sign * radius * 0.36, y - radius * 0.2, radius * 0.14, 0, Math.PI * 2);
-    context.fill();
-  }
+/** Which of the three chomp frames a tick cursor lands on. */
+export function chompPhase(animTicks: number): number {
+  const quarter = Math.floor((animTicks % CHOMP_PERIOD) / (CHOMP_PERIOD / 4));
+  // Open, half, shut, half — a triangle, so the mouth closes and opens again
+  // over one period rather than snapping back open.
+  return [CHOMP_PHASES - 1, 1, 0, 1][quarter] ?? 0;
 }
 
 /**
- * The eyes, looking the way the ghost is travelling. On an eaten ghost they
- * are the whole sprite.
- */
-function drawEyes(
-  context: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  radius: number,
-  dir: Direction,
-): void {
-  const look = DIRECTION_DELTA[dir];
-  for (const sign of [-1, 1]) {
-    const eyeX = x + sign * radius * 0.38;
-    const eyeY = y - radius * 0.2;
-
-    context.fillStyle = EYE_WHITE;
-    context.beginPath();
-    context.arc(eyeX, eyeY, radius * 0.26, 0, Math.PI * 2);
-    context.fill();
-
-    context.fillStyle = PUPIL_COLOR;
-    context.beginPath();
-    context.arc(
-      eyeX + look.x * radius * 0.11,
-      eyeY + look.y * radius * 0.11,
-      radius * 0.13,
-      0,
-      Math.PI * 2,
-    );
-    context.fill();
-  }
-}
-
-/**
- * The bonus fruit.
+ * Which death frame the `Dying` clock is on, or null once the animation has
+ * finished and the board is empty.
  *
- * TODO(render): eight distinct fruit shapes come from the atlas (architecture
- * §5.1). A coloured body and a stem is the stand-in; the colour is the one the
- * status strip uses for the same level, so the two read as the same object.
+ * Driven by the phase timer rather than a counter of its own, so it is exact
+ * under a pause and cannot drift from the 1600 ms the phase actually lasts.
  */
-function drawFruit(context: CanvasRenderingContext2D, fruit: FruitState): void {
-  const x = fruit.col + 0.5;
-  const y = fruit.row + 0.5;
-
-  context.fillStyle = FRUIT_COLORS[fruit.kind];
-  context.beginPath();
-  context.arc(x, y + 0.12, 0.42, 0, Math.PI * 2);
-  context.fill();
-
-  context.strokeStyle = '#3fae4a';
-  context.lineWidth = 0.1;
-  context.beginPath();
-  context.moveTo(x, y - 0.2);
-  context.quadraticCurveTo(x + 0.22, y - 0.5, x + 0.42, y - 0.44);
-  context.stroke();
+export function deathFrame(phaseTimer: number): number | null {
+  const elapsed = DYING_MS - phaseTimer;
+  if (elapsed < DEATH_HOLD_MS) return 0;
+  const index = Math.floor((elapsed - DEATH_HOLD_MS) / DEATH_FRAME_MS);
+  return index < DEATH_FRAMES ? index : null;
 }
 
 /**

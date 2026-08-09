@@ -37,12 +37,25 @@ export interface HighScoreStore {
   save(score: number): void;
 }
 
+/**
+ * The audio director's side of the seam (architecture §5.2).
+ *
+ * It is handed whole states rather than bare events because the loops it picks
+ * — siren tier, frightened, eyes on their way home — are a function of the
+ * state of play, not of anything that just happened.
+ */
+export interface GameAudio {
+  update(state: GameState): void;
+}
+
 export interface GameOptions {
   maze: MazeData;
   view: GameView;
   chrome: GameChrome;
   input: GameInput;
   highScore: HighScoreStore;
+  /** Optional: the game is fully playable, and fully testable, with no audio. */
+  audio?: GameAudio;
   /** Clock for input timestamps. Injectable so tests need no real `performance`. */
   now?(): number;
 }
@@ -159,6 +172,11 @@ export class Game {
       this.options.highScore.save(this.highScore);
     }
     this.drain(this.current.events);
+    // The audio director reads the same queue and the state around it. It is
+    // called after the drain, and last of all, so a subsystem that is not there
+    // — or one that throws in a browser with no Web Audio — cannot come between
+    // the simulation and the screen.
+    this.options.audio?.update(this.current);
   }
 
   /**
@@ -175,7 +193,5 @@ export class Game {
         this.options.input.reset();
       }
     }
-    // TODO(audio): hand the same queue to the audio director — chomp, death,
-    // and the Ready jingle are all in here already (product spec §4.7).
   }
 }

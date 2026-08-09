@@ -12,6 +12,13 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="description" content="Pac-Man, built for mobile web." />
+    <!-- The PNG first and the SVG second: a browser without SVG favicon
+         support ignores the second link, and one with it prefers the last
+         icon it understands. Both are drawn from the same geometry — see
+         tools/generate-icons.mjs. -->
+    <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <title>Pac-Man</title>
   </head>
   <body>
@@ -25,7 +32,17 @@
           <span class="hud__label">High</span>
           <span class="hud__value" data-hud="high-score">00</span>
         </div>
-        <button class="hud__pause" type="button" data-action="pause" aria-label="Pause">
+        <button
+          class="hud__button"
+          type="button"
+          data-action="sound"
+          aria-label="Sound"
+          aria-pressed="true"
+        >
+          <span data-sound-on>&#128266;</span>
+          <span data-sound-off hidden>&#128263;</span>
+        </button>
+        <button class="hud__button" type="button" data-action="pause" aria-label="Pause">
           &#9208;
         </button>
       </header>
@@ -37,6 +54,17 @@
           <canvas class="stage__layer" id="layer-maze"></canvas>
           <canvas class="stage__layer" id="layer-entities"></canvas>
           <canvas class="stage__layer" id="layer-overlay"></canvas>
+        </div>
+
+        <!-- The pause card itself is canvas; its options are DOM, so they are
+             real hit targets that assistive tech can find. Deliberately a
+             sibling of the board rather than a child: the board is the swipe
+             surface, and a tap captured as the start of a flick is a tap the
+             button might never see. -->
+        <div class="pause-menu" data-pause-menu>
+          <button class="pause-menu__button" type="button" data-action="new-game">
+            New Game
+          </button>
         </div>
       </main>
 
@@ -51,15 +79,21 @@
            interactive, so a stray thumb can never hit a button. -->
       <footer class="control-zone" id="control-zone">
         <div class="joystick__base" data-joystick-base data-direction="none">
-          <!-- The chevron shows the *snapped* direction while the knob shows the
-               raw thumb position, so the player can see a snapping boundary
-               coming (product spec §3.2). -->
+          <!-- The chevron shows the *snapped* direction while the knob runs
+               along the slot for that direction, out as far as the thumb has
+               pushed it (product spec §3.2). -->
           <div class="joystick__chevron" data-joystick-chevron></div>
           <div class="joystick__knob" data-joystick-knob></div>
         </div>
       </footer>
 
       <p class="too-small">Screen too small to play — try a wider window.</p>
+
+      <!-- Shown only if the sprite atlas cannot be fetched. The game draws its
+           characters from it, so there is nothing to fall back to. -->
+      <p class="load-error" id="boot-error" hidden role="alert">
+        Could not load the game's artwork. Check your connection and reload.
+      </p>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

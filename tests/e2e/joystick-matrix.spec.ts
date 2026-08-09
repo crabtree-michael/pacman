@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { JOYSTICK_INSET_PX } from '../../src/input/joystick-view';
+import { startPlay } from './harness';
 
 /**
  * The joystick half of the responsiveness sweep (product spec §3, §5).
@@ -77,6 +78,11 @@ async function settled(page: Page): Promise<void> {
       { message: 'the layout never stopped moving — did the resize loop settle?' },
     )
     .toBe(true);
+
+  // Every one of these tests wants a live board: the stick's own feedback is
+  // DOM, but the tint and the steering it is checked against are the
+  // simulation's. Play starts behind the boot gate and the attract tap.
+  await startPlay(page);
 }
 
 /**
@@ -368,6 +374,32 @@ test.describe('joystick feedback', () => {
 
     // The latch survives release, so the chevron keeps pointing the way he goes.
     await expect(base).toHaveAttribute('data-direction', 'down');
+  });
+
+  /**
+   * The first direction of a gesture is only latched once it has read the same
+   * across the decide window (§3.2), and a stab at a direction is over before
+   * that window is out. The lift settles those: the reading the thumb left on
+   * is the one that latches, so the quickest gesture a player makes still
+   * steers rather than being swallowed by the wait.
+   *
+   * Nothing here is timed, and nothing needs to be. A flick that outruns the
+   * window proves the release path; one that does not commits the ordinary way.
+   * Either way the stick has to end up pointing where it was pushed.
+   */
+  test('a flick that lets go before the window is out still steers', async ({ page }) => {
+    await page.goto('/');
+    await settled(page);
+
+    const zone = await rectOf(page, '#control-zone');
+    const centre = { x: zone.x + zone.width / 2, y: zone.y + zone.height / 2 };
+    const base = page.locator('[data-joystick-base]');
+    await expect(base).toHaveAttribute('data-direction', 'none');
+
+    await pressAndDrag(page, centre, 0, -60);
+    await page.mouse.up(); // Down, out and gone, with nothing waited on between.
+
+    await expect(base).toHaveAttribute('data-direction', 'up');
   });
 
   test('a drag in the dead wedge registers nothing until it commits to an axis', async ({
