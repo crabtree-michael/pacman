@@ -45,19 +45,16 @@ The screen divides into three stacked bands inside the safe area:
 ┌─────────────────────────────┐  ← safe-area top inset
 │  HUD BAR            ~48 px  │  1UP / SCORE / HI-SCORE, pause button
 ├─────────────────────────────┤
-│                             │
-│                             │
+│                             │  surplus height, split evenly
 │       MAZE VIEWPORT         │  fixed 28:31 tile aspect (0.903)
-│       (28 × 31 tiles)       │  centred horizontally
-│                             │
-│                             │
+│       (28 × 31 tiles)       │  centred, both ways
+│                             │  surplus height, split evenly
 ├─────────────────────────────┤
 │  STATUS STRIP       ~36 px  │  remaining lives, level fruit icons
 ├─────────────────────────────┤
-│                             │
-│      CONTROL ZONE           │  ≥ 180 px tall; joystick lives here
-│         ( ◉ )               │
-│                             │
+│                             │  180-240 px tall
+│      CONTROL ZONE           │
+│         ( ◉ )               │  joystick docked to the bottom
 └─────────────────────────────┘  ← safe-area bottom inset
 ```
 
@@ -68,32 +65,48 @@ minimum. The maze is scaled to the largest size that satisfies both:
 - `mazeHeight ≤ availableHeight − hudHeight − statusHeight − controlZoneMin`
 
 with `controlZoneMin = 180 px` in portrait. On very tall screens the maze stops
-growing at `mazeWidth = 520 px` and the surplus height is given to the control
-zone (the thumb rest gets more comfortable rather than the maze getting
-cartoonishly large).
+growing at `mazeWidth = 520 px`.
+
+**Where the surplus goes.** Whatever height the maze does not want is offered to
+the control zone first, up to `controlZoneMax = 240 px` — enough for the largest
+ring the scale rule can produce plus its inset above and below. Anything past
+that stays in the maze band, which centres the board in it, so the leftover
+reads as equal margins above and below the maze rather than as a cavern under
+it. Nothing is taken from the maze to pay for this: there is only ever a surplus
+when the maze has been capped by width (or by `mazeMaxWidth`), so the space
+being redistributed is space the maze could not have used.
 
 **Control zone.** The whole band is a touch target, not just the joystick
-graphic. The joystick renders centred and stays there; a touch anywhere in the
-band is read as a drag from that fixed centre (see §3.2). Nothing else in the
-band is interactive, so a stray thumb can never hit a button.
+graphic. The joystick renders docked against the bottom of the band and stays
+there; a touch anywhere in the band is read as a drag from that fixed centre
+(see §3.2). Nothing else in the band is interactive, so a stray thumb can never
+hit a button. The bottom is the anchor rather than the middle because the band's
+height varies with the screen while its bottom edge does not — centring in it
+put the stick most of the way up a tall phone, well above where the thumb rests.
 
 **Worked examples**
 
-| Device (CSS px) | Maze size | Control zone |
-| --- | --- | --- |
-| 360 × 640 (small Android) | 340 × 376 | 180 px (at the minimum) |
-| 390 × 844 (iPhone 14) | 390 × 432 | 328 px |
-| 430 × 932 (iPhone Pro Max) | 430 × 476 | 372 px |
-| 768 × 1024 (tablet) | 520 × 576 | 364 px, joystick pinned bottom-left |
+| Device (CSS px) | Maze size | Control zone | Margin above/below the maze |
+| --- | --- | --- | --- |
+| 360 × 640 (small Android) | 340 × 376 | 180 px (at the minimum) | 0 px |
+| 390 × 844 (iPhone 14) | 390 × 432 | 240 px (at the maximum) | 44 px |
+| 430 × 932 (iPhone Pro Max) | 430 × 476 | 240 px (at the maximum) | 56 px |
+| 768 × 1024 (tablet) | 520 × 576 | 240 px, joystick pinned bottom-left | 52 px |
 
 Each row is the sizing rule applied directly: the maze takes all the height left
-over above the 180 px minimum, so the control zone only exceeds that minimum
-when the maze is capped by width (or by `MAZE_MAX_WIDTH`, as on the tablet).
-Short screens like the 360 × 640 land exactly on the minimum.
+over above the 180 px minimum, so a surplus only exists when the maze is capped
+by width (or by `mazeMaxWidth`, as on the tablet). Short screens like the
+360 × 640 land exactly on the minimum with nothing left to distribute.
 
-On tablets (≥ 600 px wide) the joystick pins to the bottom-left rather than
-centring, because the screen is wider than a thumb arc; a right-handed toggle in
-settings mirrors it. Either way the placement is fixed for the session.
+On tablets (≥ 600 px wide) the joystick pins to the bottom-*left* rather than
+being centred across the band, because the screen is wider than a thumb arc; a
+right-handed toggle in settings mirrors it. Either way the placement is fixed
+for the session, and either way it is against the bottom.
+
+**Available space.** All of the above is measured inside the safe-area insets,
+not against the raw viewport. The insets are reserved for the notch and the home
+indicator, so the bands never get them; sizing against a height that includes
+them overflows every band by exactly the inset.
 
 ### 2.2 Landscape (supported, secondary)
 
@@ -159,8 +172,11 @@ so the control feels the same physical size on a small Android and a Pro Max.
 
 ### 3.2 Behaviour
 
-**Static placement.** The base is fixed: it sits centred in the control zone
-(bottom-left on tablets, per §2.1) and never moves. On `pointerdown` anywhere in
+**Static placement.** The base is fixed: it sits against the bottom of the
+control zone, centred across it on a phone and pushed into the near corner on a
+tablet (per §2.1), and never moves. In landscape it centres in the joystick
+gutter instead, which is already a thumb-width column running the height of the
+screen. On `pointerdown` anywhere in
 the band it fades to full opacity, and on `pointerup` it fades back over 200 ms —
 but its position is a layout constant, so the stick is always where the player
 last saw it and muscle memory carries between grabs. The origin is the ring's

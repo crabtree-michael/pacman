@@ -34,9 +34,24 @@ function clearances(
 }
 
 describe('restPosition', () => {
-  it('centres the ring in the band on a phone', () => {
+  it('docks the ring to the bottom of the band on a phone, centred across it', () => {
     const zone = { width: 390, height: 300 };
-    expect(restPosition(zone, JOYSTICK_BASE_PX, PHONE)).toEqual({ x: 195, y: 150 });
+    const rest = restPosition(zone, JOYSTICK_BASE_PX, PHONE);
+
+    expect(rest.x).toBe(195);
+    expect(rest.y).toBe(zone.height - JOYSTICK_INSET_PX - JOYSTICK_BASE_PX / 2);
+  });
+
+  /**
+   * The band's height varies with the screen; its bottom edge does not. Docking
+   * against the bottom is what keeps the stick under the thumb on a tall phone,
+   * where centring it in the band put it most of the way up the screen.
+   */
+  it('rests the same distance off the bottom however tall the band gets', () => {
+    const shallow = restPosition({ width: 390, height: 180 }, JOYSTICK_BASE_PX, PHONE);
+    const deep = restPosition({ width: 390, height: 240 }, JOYSTICK_BASE_PX, PHONE);
+
+    expect(180 - shallow.y).toBe(240 - deep.y);
   });
 
   it('corners it bottom-left on a portrait tablet', () => {

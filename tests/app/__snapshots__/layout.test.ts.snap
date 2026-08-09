@@ -3,21 +3,21 @@
 exports[`layout matrix > matches the recorded band maths 1`] = `
 [
   {
-    "controlZone": 328.21,
+    "controlZone": 240,
     "device": "iPhone 12/13/14 — 390x844",
     "maze": "390x431.79",
     "orientation": "portrait",
     "tooSmall": false,
   },
   {
-    "controlZone": 371.93,
+    "controlZone": 240,
     "device": "iPhone 14 Pro Max — 430x932",
     "maze": "430x476.07",
     "orientation": "portrait",
     "tooSmall": false,
   },
   {
-    "controlZone": 331.89,
+    "controlZone": 240,
     "device": "Pixel 5 — 393x851",
     "maze": "393x435.11",
     "orientation": "portrait",
@@ -31,7 +31,7 @@ exports[`layout matrix > matches the recorded band maths 1`] = `
     "tooSmall": false,
   },
   {
-    "controlZone": 364.29,
+    "controlZone": 240,
     "device": "iPad — 768x1024",
     "maze": "520x575.71",
     "orientation": "portrait",

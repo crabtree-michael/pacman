@@ -255,9 +255,10 @@ body {
 
 /*
  * JoystickView owns where the ring is, as a single translate to a zone-local
- * point — centred on a phone, cornered on a tablet (product spec §2.1, §3.2).
- * The stick is static, so that translate only ever changes on a relayout;
- * keeping position in one property leaves a single source of truth for it.
+ * point — docked to the bottom of the band in portrait, centred in the gutter
+ * in landscape (product spec §2.1, §3.2). The stick is static, so that
+ * translate only ever changes on a relayout; keeping position in one property
+ * leaves a single source of truth for it.
  */
 .joystick__base {
   position: absolute;

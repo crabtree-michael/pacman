@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { JOYSTICK_INSET_PX } from '../../src/input/joystick-view';
 import { startPlay } from './harness';
 
 /**
@@ -314,6 +315,37 @@ test.describe('joystick fits and steers at every supported size', () => {
       }
 
       expect(problems).toEqual([]);
+    });
+  }
+});
+
+/**
+ * Where the ring comes to rest, in a real browser (product spec §2.1).
+ *
+ * `tests/input/placement.test.ts` checks the arithmetic; this checks that the
+ * arithmetic is fed a band the shape it thinks it is. The failure being pinned
+ * is the stick sitting halfway up a tall phone, which is what centring it in a
+ * band that had swallowed every spare pixel of height produced.
+ */
+test.describe('the stick rests at the bottom in portrait', () => {
+  for (const size of SIZES.filter((s) => s.height > s.width)) {
+    test(`docks to the bottom of the band at ${size.label}`, async ({ page }) => {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      await page.goto('/');
+      await settled(page);
+
+      const zone = await rectOf(page, '#control-zone');
+      const ring = await rectOf(page, '[data-joystick-base]');
+      const below = zone.y + zone.height - (ring.y + ring.height);
+
+      // Its own inset off the bottom edge, and no more. Anything looser passes
+      // for a *centred* ring too once the band is capped — the two placements
+      // are only some tens of px apart on a 240 px band, which is precisely why
+      // this asserts the exact resting gap rather than a half-band tolerance.
+      expect(below, 'the ring hangs below the band').toBeGreaterThanOrEqual(-SLACK);
+      expect(below, 'the ring floats above the bottom of the band').toBeLessThanOrEqual(
+        JOYSTICK_INSET_PX + SLACK,
+      );
     });
   }
 });

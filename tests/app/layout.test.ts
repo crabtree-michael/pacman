@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CONTROL_ZONE_MAX,
   CONTROL_ZONE_MIN,
+  HUD_HEIGHT,
   MIN_SUPPORTED_WIDTH,
+  STATUS_HEIGHT,
   TABLET_MIN_WIDTH,
   computeLayout,
 } from '../../src/app/layout';
@@ -63,6 +66,43 @@ describe('layout matrix', () => {
       expect(metrics.controlZone).toBeGreaterThanOrEqual(
         metrics.orientation === 'portrait' ? CONTROL_ZONE_MIN : 120,
       );
+    }
+  });
+
+  /**
+   * The band used to swallow every spare pixel, so on a tall phone it was 330+
+   * px of empty black with the stick floating in the middle of it. Capped, the
+   * surplus goes to the stage instead — where the board is centred in it.
+   */
+  it('never lets the thumb band grow past its ceiling in portrait', () => {
+    for (const device of DEVICES) {
+      const metrics = computeLayout(
+        device.width,
+        device.height,
+        MAZE_CLASSIC.cols,
+        MAZE_CLASSIC.rows,
+      );
+      if (metrics.orientation !== 'portrait') continue;
+      expect(metrics.controlZone, device.name).toBeLessThanOrEqual(CONTROL_ZONE_MAX);
+    }
+  });
+
+  it('leaves the surplus as symmetric margins around the board', () => {
+    for (const device of DEVICES) {
+      const metrics = computeLayout(
+        device.width,
+        device.height,
+        MAZE_CLASSIC.cols,
+        MAZE_CLASSIC.rows,
+      );
+      if (metrics.orientation !== 'portrait') continue;
+
+      // What the stage gets once the three fixed bands have taken theirs. The
+      // board is centred in it, so this has to be big enough to hold the board
+      // — a negative margin would mean the maze overflowing its own band.
+      const stage = device.height - HUD_HEIGHT - STATUS_HEIGHT - metrics.controlZone;
+      expect(stage - metrics.mazeHeight, `${device.name}: the board overflows the stage`)
+        .toBeGreaterThanOrEqual(0);
     }
   });
 
