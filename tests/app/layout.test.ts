@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { CONTROL_ZONE_MIN, MIN_SUPPORTED_WIDTH, computeLayout } from '../../src/app/layout';
+import {
+  CONTROL_ZONE_MIN,
+  MIN_SUPPORTED_WIDTH,
+  TABLET_MIN_WIDTH,
+  computeLayout,
+} from '../../src/app/layout';
 import { MAZE_CLASSIC } from '../../src/data/maze-classic';
 import { MAX_DPR, computeViewport } from '../../src/render/viewport';
 
@@ -66,6 +71,15 @@ describe('layout matrix', () => {
     const wide = computeLayout(MIN_SUPPORTED_WIDTH, 640, MAZE_CLASSIC.cols, MAZE_CLASSIC.rows);
     expect(narrow.tooSmall).toBe(true);
     expect(wide.tooSmall).toBe(false);
+  });
+
+  it('flags screens wide enough to pin the joystick to a corner', () => {
+    // Product spec §2.1: at 600 px and above the screen is wider than a thumb
+    // arc, so the stick rests bottom-left instead of centred.
+    const phone = computeLayout(TABLET_MIN_WIDTH - 1, 1024, MAZE_CLASSIC.cols, MAZE_CLASSIC.rows);
+    const tablet = computeLayout(TABLET_MIN_WIDTH, 1024, MAZE_CLASSIC.cols, MAZE_CLASSIC.rows);
+    expect(phone.tablet).toBe(false);
+    expect(tablet.tablet).toBe(true);
   });
 
   it('keeps the maze within the space it was given', () => {
