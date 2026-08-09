@@ -45,7 +45,8 @@ npm run check        # typecheck, unit tests, build, browser tests
 | `npm run check`        | Everything above, in the order CI would run them |
 
 Arrow keys or WASD work on desktop; on a touchscreen you get the virtual
-joystick.
+joystick, or a swipe anywhere on the maze. A gamepad D-pad works if one is
+plugged in.
 
 ### On a phone
 
@@ -79,7 +80,7 @@ src/
   app/
     loop.ts                 Fixed-timestep driver, visibility handling
     layout.ts               Viewport band maths (product spec §2)
-    persistence.ts          localStorage: high score
+    persistence.ts          localStorage: high score, input settings
   sim/                      Pure, DOM-free (architecture §3)
     step.ts                 One tick: step(state, input, dt) -> state
     movement.ts             Grid motion, turn buffering, tunnel wrap
@@ -97,8 +98,11 @@ src/
   input/
     controller.ts           Arbitration and latching
     joystick.ts             Dead zone, 4-way snapping, hysteresis (no DOM)
-    joystick-view.ts        Pointer handlers and CSS transforms
+    joystick-view.ts        Pointer handlers, placement, CSS transforms
+    swipe.ts                Flick-to-steer on the maze
     keyboard.ts             Desktop convenience
+    gamepad.ts              D-pad and left stick, polled once a tick
+    haptics.ts              A 10 ms pulse on each direction change
   ui/hud.ts                 Score, high score, lives (DOM, not canvas)
   data/maze-classic.ts      28 x 31 board, 244 collectibles
   styles/main.css           Bands, safe areas, joystick
@@ -136,17 +140,24 @@ Four invariants hold this together, and each has a cost to give up:
 | -------------------- | ------------------------ | ------------------------------------------------------------------- |
 | `tests/sim`          | Vitest, Node             | Turn legality, wall stops, turn-buffer expiry, tunnel wrap, the PRNG |
 | `tests/app`          | Vitest, Node             | Layout bands and viewport fitting, snapshotted over a device matrix  |
-| `tests/input`        | Vitest, Node             | Dead zone, 4-way snapping, hysteresis, latching                      |
+| `tests/input`        | Vitest, Node             | Dead zone, snapping, hysteresis, latching, arbitration, resting placement, gamepad, haptics |
 | `tests/replays`      | Vitest, Node             | A scripted input stream run headless, hashed to one digest           |
 | `tests/boundary`     | Vitest, Node             | The `sim/` isolation rule                                            |
 | `tests/dom`          | Vitest, jsdom            | The HUD                                                              |
-| `tests/e2e`          | Playwright, WebKit + Chromium | Mounting, the render loop, pointer-driven steering, rotation, and a nine-size layout matrix |
+| `*.dom.test.ts`      | Vitest, jsdom            | The DOM half of a layer, alongside its headless half (swipe, settings storage) |
+| `tests/e2e`          | Playwright, WebKit + Chromium | Mounting, the render loop, pointer-driven steering, rotation, a nine-size layout matrix, and the same nine sizes swept for joystick reach and feedback |
 
-Two things about this setup are deliberate.
+Three things about this setup are deliberate.
 
 **The node and jsdom projects are separate.** `sim/` must keep running with no
 DOM in scope at all, and a jsdom-everywhere config would happily let a
 `document` reference slip into the simulation without failing.
+
+**A `*.dom.test.ts` suffix picks the environment, not a directory.** Some layers
+have a headless half and a DOM half that belong together — `input/swipe.ts` is
+pointer plumbing wrapped around maths — and splitting them by runner would put
+one half of a module two directories from the other. The suffix keeps them
+adjacent while leaving the node/jsdom split as sharp as it was.
 
 **The replay digest is a change detector, not a spec.** `tests/replays` runs a
 scripted stream of `(tick, direction)` pairs through the simulation and hashes
@@ -193,9 +204,19 @@ The type-level half of the same rule is the two-project tsconfig: `src/` gets
 
 Working: build tooling, the fixed-timestep loop with visibility suspend, the
 three-layer renderer with DPR-capped viewport fitting, grid-locked movement
-with turn buffering and tunnel wrap, the floating joystick with dead zone and
-hysteresis (pinned bottom-left at tablet widths, per spec §2.1), keyboard input,
-the HUD, and the portrait/landscape layout.
+with turn buffering and tunnel wrap, the HUD, and the portrait/landscape layout.
+
+Input is complete to spec §3: the floating joystick with dead zone, 4-way
+snapping and hysteresis; the chevron, buffered-turn tint and 200 ms return that
+make its state legible; direction latching across a lifted thumb; swipe, keyboard
+and gamepad sharing the same intent pipeline; haptics; and the handedness and
+large-stick accessibility options. The stick pins to a corner at tablet widths
+(§2.1) and mirrors for a right-handed player (§3.4).
+
+The settings *screen* is not built — it is `TODO(ui)` with the rest of the menus.
+The options above are read from `localStorage` and honoured at boot, so that
+screen only has to call `saveSettings`; until it exists they ship at their
+defaults and can only be changed by hand.
 
 Not built yet, each marked with a `TODO(area)` comment where it belongs:
 
@@ -233,9 +254,18 @@ noted as still manual.
 - Reversal turns on the spot mid-corridor, as the spec requires
 - Two identical runs produce bit-identical state
 - Joystick hysteresis holds at a 1.10x challenge and switches at 1.20x, per the
-  spec's 15% margin
+  spec's 15% margin, in the maths and again through a real drag in the browser
+- The ring stays wholly inside the control zone, and steers, from all four
+  corners and the middle of the band, at all nine supported sizes on both
+  engines — the spec's "no clipping or unreachable controls" criterion
+- The chevron tracks the snapped direction, the knob tints while a turn is
+  buffered and clears when the buffer expires, and the ring eases home over
+  200 ms rather than jumping
+- Swipe, keyboard and joystick all reach the simulation through the same
+  pipeline; a flick under the 24 px threshold does not, and swiping the maze
+  never scrolls the page
 - Viewport caps DPR at 3 and snaps the tile size to whole device pixels
-- Production bundle is 6.2 kB gzipped, against the architecture's 120 kB budget
+- Production bundle is 8.7 kB gzipped, against the architecture's 120 kB budget
   *(manual — the CI gate from architecture §7 is not built)*
 - The page mounts, fits and runs its loop on Android and iOS emulation, and a
   synthetic drag on the joystick steers Pac-Man, with no console errors
@@ -255,6 +285,32 @@ owner has ruled the written rule authoritative, so the table has been corrected
 to the figures the rule produces (control zones of 180/328/372/364 px, and a
 340x376 maze on 360x640). `CONTROL_ZONE_MIN` stays at 180 and the code is
 unchanged.
+
+### Departed: the joystick scales off the screen's short edge
+
+Product spec §3.1 sizes the stick by `clamp(0.85, screenWidth / 390, 1.25)`.
+Read literally that is `innerWidth`, which in landscape is the *long* edge — so
+a 568x320 phone, whose joystick gutter is the narrowest in the whole supported
+range at about 150 px, asked for the 1.25x maximum and a 160 px ring. The ring
+did not fit the gutter it had to live in.
+
+The code uses `min(innerWidth, innerHeight)` instead. That is the same number in
+both orientations and tracks the device rather than how it is being held, which
+is what the rule's stated intent — "the same physical size on a small Android and
+a Pro Max" — is after; portrait behaviour is identical. A second clamp then fits
+the ring to its zone outright, so no future band arithmetic can produce a stick
+too big for the band. Both are covered by the joystick sweep in `tests/e2e`.
+
+Worth a spec-owner confirmation, since it is the wording rather than the intent
+that changed.
+
+### Defaulted: swipe-to-steer is on
+
+Product spec open question 4 asks whether a swipe on the maze ships enabled or
+opt-in, and is unresolved. It ships **enabled**, behind a settings flag either
+way. Nothing else on the maze is interactive, so a swipe cannot be mistaken for
+another gesture, and the cost of the wrong default is one toggle rather than a
+missing feature. Flip `DEFAULT_SETTINGS.swipe` if playtesting disagrees.
 
 ## Deployment
 

@@ -23,6 +23,18 @@ export const JOYSTICK_RECENTRE_PX = 8;
  */
 export const HYSTERESIS = 1.15;
 
+/** Accessibility: "enlarges the joystick by 1.5x" (product spec §3.4). */
+export const ACCESSIBLE_SIZE_FACTOR = 1.5;
+
+/**
+ * ..."and widens the dead zone", on top of the widening the 1.5x size already
+ * brings. The spec lists the two as separate effects, and they are: scaling
+ * alone keeps the dead zone at 25% of the drag radius, which is the same
+ * steadiness demand on a larger control. This factor takes it to 37.5%, so a
+ * tremor has somewhere to go before it registers as a turn.
+ */
+export const ACCESSIBLE_DEAD_ZONE_FACTOR = 1.5;
+
 export interface Vec2 {
   x: number;
   y: number;
@@ -39,17 +51,44 @@ export class VirtualJoystick implements InputSource {
 
   /** Scales with screen size so the control feels the same physical size. */
   private scale = 1;
+  /** Accessibility mode: a bigger stick with more slack around centre (§3.4). */
+  private accessible = false;
 
   setScale(scale: number): void {
     this.scale = scale;
   }
 
+  setAccessible(accessible: boolean): void {
+    this.accessible = accessible;
+  }
+
+  /** The accessibility enlargement alone, without the screen scale. */
+  get accessibilityFactor(): number {
+    return this.accessible ? ACCESSIBLE_SIZE_FACTOR : 1;
+  }
+
+  /** Screen scale and the accessibility enlargement, combined. */
+  get sizeScale(): number {
+    return this.scale * this.accessibilityFactor;
+  }
+
   get deadZone(): number {
-    return JOYSTICK_DEAD_ZONE_PX * this.scale;
+    const extra = this.accessible ? ACCESSIBLE_DEAD_ZONE_FACTOR : 1;
+    return JOYSTICK_DEAD_ZONE_PX * this.sizeScale * extra;
   }
 
   get maxRadius(): number {
-    return JOYSTICK_MAX_RADIUS_PX * this.scale;
+    return JOYSTICK_MAX_RADIUS_PX * this.sizeScale;
+  }
+
+  /** The quantised direction the ring's chevron shows (product spec §3.2). */
+  get snapped(): Direction {
+    return this.latched;
+  }
+
+  /** True while a thumb is down; the view fades the ring in on the strength of it. */
+  get engaged(): boolean {
+    return this.base !== null;
   }
 
   press(base: Vec2): void {
@@ -93,6 +132,16 @@ export class VirtualJoystick implements InputSource {
 
     this.latched = next;
     return { dir: next, timestamp: nowMs, source: this.name };
+  }
+
+  /**
+   * Forget the latched direction without letting go of the stick.
+   *
+   * A thumb that is still down is re-read on the next tick and re-emits, which
+   * is the point: only the memory of a *released* stick is stale.
+   */
+  reset(): void {
+    this.latched = Direction.None;
   }
 
   destroy(): void {

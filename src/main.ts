@@ -1,14 +1,18 @@
 import { applyLayout, computeLayout } from './app/layout';
 import { GameLoop } from './app/loop';
-import { loadHighScore, saveHighScore } from './app/persistence';
+import { loadHighScore, loadSettings, saveHighScore } from './app/persistence';
 import { MAZE_CLASSIC } from './data/maze-classic';
 import { InputController } from './input/controller';
+import { GamepadInput } from './input/gamepad';
+import { Haptics } from './input/haptics';
 import { JoystickView } from './input/joystick-view';
 import { KeyboardInput } from './input/keyboard';
 import { VirtualJoystick } from './input/joystick';
+import { SwipeInput } from './input/swipe';
 import { Renderer } from './render/renderer';
 import { createInitialState } from './sim/state';
 import { step } from './sim/step';
+import { Direction } from './sim/types';
 import { Hud } from './ui/hud';
 import './styles/main.css';
 
@@ -30,6 +34,7 @@ function required<T extends Element>(selector: string): T {
 
 const app = required<HTMLElement>('#app');
 const controlZone = required<HTMLElement>('#control-zone');
+const board = required<HTMLElement>('#board');
 
 const renderer = new Renderer({
   maze: required<HTMLCanvasElement>('#layer-maze'),
@@ -37,9 +42,26 @@ const renderer = new Renderer({
   overlay: required<HTMLCanvasElement>('#layer-overlay'),
 });
 
+// TODO(ui): the settings screen that writes these back is unbuilt, so today
+// this only reads. Everything downstream already honours a change.
+const settings = loadSettings();
+app.dataset['handedness'] = settings.handedness;
+
 const joystick = new VirtualJoystick();
+joystick.setAccessible(settings.largeJoystick);
 const joystickView = new JoystickView(controlZone, joystick);
-const input = new InputController().use(joystick).use(new KeyboardInput());
+
+// Four sources, one pipeline. The controller cannot tell them apart, which is
+// exactly why a recorded intent stream can stand in for all of them (§4.3).
+const swipe = new SwipeInput(board);
+swipe.setEnabled(settings.swipe);
+const input = new InputController()
+  .use(joystick)
+  .use(swipe)
+  .use(new KeyboardInput())
+  .use(new GamepadInput());
+
+const haptics = new Haptics(settings.haptics);
 
 const hud = new Hud(document);
 let highScore = loadHighScore();
@@ -63,14 +85,21 @@ function relayout(): void {
   );
   applyLayout(app, metrics);
   renderer.resize(metrics.mazeWidth, metrics.mazeHeight, current);
-  joystickView.resize();
+  joystickView.resize({
+    tablet: metrics.tablet,
+    orientation: metrics.orientation,
+    handedness: settings.handedness,
+  });
 }
 
 const loop = new GameLoop({
   step(stepMs) {
     input.sample(performance.now());
+    const snapshot = input.snapshot();
+    haptics.observe(snapshot);
+
     previous = current;
-    current = step(current, input.snapshot(), stepMs);
+    current = step(current, snapshot, stepMs);
 
     if (current.score > highScore) {
       highScore = current.score;
@@ -81,13 +110,16 @@ const loop = new GameLoop({
   },
   render(alpha) {
     renderer.render(previous, current, alpha);
-    joystickView.syncKnob();
+    // The ring tints while the simulation is holding a turn request and clears
+    // when it consumes one, so `pendingDir` is read straight from state.
+    joystickView.sync(current.pacman.pendingDir !== Direction.None);
     hud.update(current, highScore);
   },
   onSuspend() {
     // TODO(ui): show the pause overlay rather than resuming into a moving
     // Pac-Man (product spec §2.3).
     input.reset();
+    haptics.reset();
   },
 });
 
@@ -100,6 +132,7 @@ loop.start();
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
     loop.destroy();
+    // Tears down every registered source, the swipe surface included.
     input.destroy();
     joystickView.destroy();
   });
