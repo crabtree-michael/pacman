@@ -1,0 +1,102 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`layout matrix > matches the recorded band maths 1`] = `
+[
+  {
+    "controlZone": 328.21,
+    "device": "iPhone 12/13/14 — 390x844",
+    "maze": "390x431.79",
+    "orientation": "portrait",
+    "tooSmall": false,
+  },
+  {
+    "controlZone": 371.93,
+    "device": "iPhone 14 Pro Max — 430x932",
+    "maze": "430x476.07",
+    "orientation": "portrait",
+    "tooSmall": false,
+  },
+  {
+    "controlZone": 331.89,
+    "device": "Pixel 5 — 393x851",
+    "maze": "393x435.11",
+    "orientation": "portrait",
+    "tooSmall": false,
+  },
+  {
+    "controlZone": 180,
+    "device": "small Android — 360x640",
+    "maze": "339.61x376",
+    "orientation": "portrait",
+    "tooSmall": false,
+  },
+  {
+    "controlZone": 364.29,
+    "device": "iPad — 768x1024",
+    "maze": "520x575.71",
+    "orientation": "portrait",
+    "tooSmall": false,
+  },
+  {
+    "controlZone": 256.71,
+    "device": "landscape phone — 844x390",
+    "maze": "330.58x366",
+    "orientation": "landscape",
+    "tooSmall": false,
+  },
+  {
+    "controlZone": 223.86,
+    "device": "below the supported width — 300x640",
+    "maze": "300x332.14",
+    "orientation": "portrait",
+    "tooSmall": true,
+  },
+]
+`;
+
+exports[`viewport matrix > matches the recorded tile fitting 1`] = `
+[
+  {
+    "device": "iPhone 12/13/14 — 390x844",
+    "dpr": 3,
+    "origin": "4,4",
+    "tileSize": 13.67,
+  },
+  {
+    "device": "iPhone 14 Pro Max — 430x932",
+    "dpr": 3,
+    "origin": "0,0",
+    "tileSize": 15.33,
+  },
+  {
+    "device": "Pixel 5 — 393x851",
+    "dpr": 2.75,
+    "origin": "3,3",
+    "tileSize": 13.82,
+  },
+  {
+    "device": "small Android — 360x640",
+    "dpr": 2,
+    "origin": "2,2",
+    "tileSize": 12,
+  },
+  {
+    "device": "iPad — 768x1024",
+    "dpr": 2,
+    "origin": "1,1",
+    "tileSize": 18.5,
+  },
+  {
+    "device": "landscape phone — 844x390",
+    "dpr": 3,
+    "origin": "2,2",
+    "tileSize": 11.67,
+  },
+  {
+    "device": "below the supported width — 300x640",
+    "dpr": 2,
+    "origin": "3,3",
+    "tileSize": 10.5,
+  },
+]
+`;

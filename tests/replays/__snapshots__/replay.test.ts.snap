@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`whole-game replay > matches the recorded digest 1`] = `"e1954dd4"`;
