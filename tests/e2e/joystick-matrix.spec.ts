@@ -79,53 +79,58 @@ async function settled(page: Page): Promise<void> {
 }
 
 /**
- * Wait until Pac-Man has walked the spawn corridor out and stopped.
+ * Wait until Pac-Man has walked the spawn corridor out and stopped, alive.
  *
- * Left unsteered he heads left from (13, 23) and parks against the wall at
- * (6, 23), where he stays — ghosts do not move yet. That parked state is what
- * makes the turn-buffer assertions below deterministic: *left* is the one
- * direction that can never be honoured from it, so a request for it sits in
- * the buffer for the spec's full 400 ms and then expires. Anywhere
- * mid-corridor the maze offers a turn every three tiles, and whether a request
- * is still buffered a frame later comes down to timing.
+ * Left unsteered he heads left from (13, 23), eats seven pellets and parks
+ * against the wall at (6, 23). That parked state is what makes the turn-buffer
+ * assertions below deterministic: *left* is the one direction that can never be
+ * honoured from it, so a request for it sits in the buffer for the spec's full
+ * 400 ms and then expires. Anywhere mid-corridor the maze offers a turn every
+ * three tiles, and whether a request is still buffered a frame later comes down
+ * to timing.
  *
  * Waiting a fixed number of milliseconds does not get there reliably. The
  * simulation advances in fixed ticks driven by `requestAnimationFrame`, and a
  * frame the engine never delivers is time the sim skips rather than makes up
  * (the `MAX_FRAME_MS` clamp) — so sim time runs behind wall-clock time by
- * however much the engine stalls, and WebKit stalls more than Chromium. The
- * entity layer answers the question directly instead: it holds still through
- * the countdown, changes while he walks, and goes still again once he stops.
+ * however much the engine stalls, and WebKit stalls more than Chromium.
+ *
+ * The score answers the question directly: it climbs while he is eating his way
+ * along the corridor and stops when he runs out of it. It used to be the entity
+ * layer holding still that said so, which stopped working the day the ghosts
+ * started moving — that canvas now changes on every frame for ever. Lives are
+ * read alongside it because a ghost eventually finds him, and a game that has
+ * moved on to the death freeze is also perfectly still.
  */
 async function waitUntilParked(page: Page): Promise<void> {
-  const frame = (): Promise<string> =>
-    page.evaluate(
-      () => document.querySelector<HTMLCanvasElement>('#layer-entities')?.toDataURL() ?? '',
-    );
+  const reading = (): Promise<string> =>
+    page.evaluate(() => {
+      const score = document.querySelector('[data-hud="score"]')?.textContent ?? '';
+      const lives = document.querySelectorAll('[data-hud="lives"] .status__life').length;
+      return `${score}|${lives}`;
+    });
 
-  let last = await frame();
-  let changes = 0;
+  let last = await reading();
+  let moved = false;
   let stable = 0;
 
   await expect
     .poll(
       async () => {
-        const next = await frame();
+        const next = await reading();
         if (next !== last) {
-          changes++;
+          moved = true;
           stable = 0;
-        } else if (next !== '') {
+        } else {
           stable++;
         }
         last = next;
-        // Several changes, not one: the layer also changes once when the first
-        // real paint replaces the blank canvas, and treating that as "he is
-        // walking" would accept the countdown's stillness as him having parked.
-        // He is only actually parked after a stretch of movement has stopped.
-        return changes >= 3 && stable >= 2;
+        // The score has to have climbed before it stopping means anything:
+        // it is also perfectly stable through the three-second countdown.
+        return moved && stable >= 2 && last.endsWith('|3');
       },
       {
-        message: 'Pac-Man never walked the corridor out and stopped',
+        message: 'Pac-Man never ate his way along the corridor and stopped, alive',
         intervals: [100],
         timeout: 20_000,
       },

@@ -1,4 +1,5 @@
 import { takeFruit } from './fruit';
+import { noteDotEaten } from './ghosts/house';
 import { speedFromPct, tuningForLevel } from './levels';
 import { Pellet, takePelletAt } from './maze';
 import { actorTile, movePacman } from './movement';
@@ -26,6 +27,16 @@ import { GhostMode, type GameState } from './types';
  */
 export const PELLET_STALL_TICKS = 1;
 export const POWER_PELLET_STALL_TICKS = 3;
+
+/**
+ * How long the board holds still while an eaten ghost's score shows.
+ *
+ * The arcade freezes everything — Pac-Man, the ghosts, both clocks — for about
+ * a second so the player can read the 200 hanging in the maze. It is not
+ * decoration: that second is thinking time in the middle of a chase, and
+ * without it a four-ghost chain is a blur rather than a plan.
+ */
+export const GHOST_EATEN_FREEZE_MS = 1000;
 
 /**
  * Advance Pac-Man one tick and collect whatever he lands on.
@@ -60,6 +71,10 @@ function eat(state: GameState, col: number, row: number): void {
   if (pellet === Pellet.None) return;
 
   state.dotsEaten++;
+  // The fruit counts dots for the level; the house counts them for itself
+  // (product spec §4.4 and §4.3), and the two counters part company after a
+  // death.
+  noteDotEaten(state);
 
   if (pellet === Pellet.Power) {
     award(state, POWER_PELLET_POINTS);
@@ -82,14 +97,14 @@ function eat(state: GameState, col: number, row: number): void {
  * one tick cross without touching. Reproducing that is the point — a distance
  * test would quietly close a gap players have exploited for forty years.
  *
- * Ghosts already eaten are eyes, and ghosts in the house are unreachable, so
- * neither is contact.
+ * Ghosts already eaten are eyes, and ghosts in the house or on their way out of
+ * it are behind a door Pac-Man cannot open, so neither is contact.
  */
 export function resolveGhostContact(state: GameState): boolean {
   const pacman = actorTile(state.maze.data, state.pacman);
 
   for (const ghost of state.ghosts) {
-    if (ghost.mode === GhostMode.Eaten || ghost.mode === GhostMode.House) continue;
+    if (!isReachable(ghost.mode)) continue;
 
     const tile = actorTile(state.maze.data, ghost);
     if (tile.col !== pacman.col || tile.row !== pacman.row) continue;
@@ -99,12 +114,19 @@ export function resolveGhostContact(state: GameState): boolean {
     const points = ghostPoints(state.fright.ghostsEaten);
     state.fright.ghostsEaten++;
     award(state, points);
-    // TODO(ghosts): the eyes' journey home and the ~1 s freeze while the score
-    // bubble shows land with the ghost ticket; the ghost holds where it was
-    // eaten until then, harmless because eyes are not contact.
+    // Eyes, and the board holds still while the score shows. The ghost heads
+    // home under its own steam from here (`ghosts/ghost.ts`).
     ghost.mode = GhostMode.Eaten;
+    state.freezeMs = GHOST_EATEN_FREEZE_MS;
     state.events.push({ type: 'GhostEaten', name: ghost.name, points });
   }
 
   return false;
+}
+
+/** Modes Pac-Man can actually run into. */
+function isReachable(mode: GhostMode): boolean {
+  return (
+    mode !== GhostMode.Eaten && mode !== GhostMode.House && mode !== GhostMode.Leaving
+  );
 }

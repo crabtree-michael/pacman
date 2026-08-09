@@ -102,6 +102,9 @@ export function canonical(state: GameState): string {
     `rng=${state.rng}`,
     `serial=${state.lastInputSerial}`,
     `fright=${String(state.fright.active)}:${state.fright.msRemaining}:${state.fright.ghostsEaten}`,
+    `modes=${state.modeTimer.index}:${state.modeTimer.msRemaining.toFixed(6)}`,
+    `house=${state.house.dots}:${state.house.msSinceDot.toFixed(6)}`,
+    `freeze=${state.freezeMs.toFixed(6)}`,
     `remaining=${state.maze.remaining}`,
     `dots=${state.dotsEaten}`,
     `fruit=${fruitPart(state.fruit)}:${state.fruitsShown}`,
@@ -166,6 +169,38 @@ export const LAP_REPLAY: Replay = {
  * → west onto the pellet at (1, 23). Each turn is requested a few tiles early
  * and taken at the junction, which is the pre-turn window doing its job.
  */
+/**
+ * Twenty-five seconds with the ghosts in charge.
+ *
+ * The two replays above were recorded when ghosts held still, and they are
+ * short enough that they still mostly test Pac-Man. This one runs long enough
+ * for the ghost half of the game to happen: the house empties on its dot
+ * counter and its timeout, a power pellet turns the board blue and wears off,
+ * the global cursor rolls from scatter into chase and turns everyone round,
+ * and a ghost eventually corners Pac-Man — so the death and the respawn are in
+ * the digest too.
+ *
+ * The route is the power-pellet run, then a wander back east. It is not good
+ * play; it is a route that keeps him alive long enough to be caught by ghost AI
+ * rather than by walking into a corner.
+ */
+export const HUNT_REPLAY: Replay = {
+  name: 'hunted',
+  seed: DEFAULT_SEED,
+  ticks: 1500,
+  events: [
+    { tick: 180, dir: Direction.Left },
+    { tick: 220, dir: Direction.Down },
+    { tick: 260, dir: Direction.Left },
+    { tick: 272, dir: Direction.Up },
+    { tick: 305, dir: Direction.Left },
+    { tick: 420, dir: Direction.Right },
+    { tick: 700, dir: Direction.Up },
+    { tick: 900, dir: Direction.Right },
+    { tick: 1100, dir: Direction.Down },
+  ],
+};
+
 export const POWER_REPLAY: Replay = {
   name: 'power pellet run',
   seed: DEFAULT_SEED,

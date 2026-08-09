@@ -1,4 +1,4 @@
-import { SUBTILE, type FruitKind } from './types';
+import { SUBTILE, type FruitKind, type GhostName } from './types';
 
 /**
  * Per-level tuning (product spec §4.2, §4.3, §4.5).
@@ -49,8 +49,19 @@ export interface LevelTuning {
   elroy1SpeedPct: number;
   elroy2Dots: number;
   elroy2SpeedPct: number;
+  /** Dots that must be eaten before each ghost leaves the house (spec §4.3). */
+  houseDots: HouseDots;
+  /** No dots eaten for this long releases the next ghost anyway (spec §4.3). */
+  houseTimeoutMs: number;
   fruit: Fruit;
 }
+
+/**
+ * Blinky is in the table at zero because he never waits: he starts outside the
+ * house and, once eaten, comes straight back out. Listing him keeps the lookup
+ * a plain index by name rather than a lookup with a hole in it.
+ */
+export type HouseDots = Readonly<Record<GhostName, number>>;
 
 interface SpeedBand {
   pacmanSpeedPct: number;
@@ -129,6 +140,31 @@ const ELROY_DOTS: readonly (readonly [number, number])[] = [
   [120, 60],
 ];
 
+/**
+ * Dots owed before each ghost leaves the house, level 1 first; level 3 and up
+ * hold nobody back.
+ *
+ * Product spec §4.3 states level 1 — "Blinky immediately, Pinky at 0 dots, Inky
+ * at 30, Clyde at 60" — and is silent on the rest, so the rest is the arcade's:
+ * Clyde alone waits on level 2, and from level 3 the whole house empties at
+ * once. That escalation is the difficulty curve doing its job.
+ */
+const HOUSE_DOTS: readonly HouseDots[] = [
+  { blinky: 0, pinky: 0, inky: 30, clyde: 60 },
+  { blinky: 0, pinky: 0, inky: 0, clyde: 50 },
+  { blinky: 0, pinky: 0, inky: 0, clyde: 0 },
+];
+
+/**
+ * The fallback that stops play stalling: this long without a dot and the next
+ * ghost leaves regardless (product spec §4.3, 4 s falling to 3 s from level 5).
+ *
+ * Without it a player who stops eating keeps three ghosts parked in the house
+ * for ever, which is a stalemate rather than a strategy.
+ */
+const HOUSE_TIMEOUT_MS = 4000;
+const HOUSE_TIMEOUT_MS_FAST = 3000;
+
 /** Bonus fruit by level, level 1 first; level 13 and up all take the key. */
 const FRUITS: readonly Fruit[] = [
   { kind: 'cherry', points: 100 },
@@ -176,6 +212,8 @@ export function tuningForLevel(level: number): LevelTuning {
     frightMs: rowFor(FRIGHT_SECONDS, clamped) * 1000,
     elroy1Dots,
     elroy2Dots,
+    houseDots: rowFor(HOUSE_DOTS, clamped),
+    houseTimeoutMs: clamped >= 5 ? HOUSE_TIMEOUT_MS_FAST : HOUSE_TIMEOUT_MS,
     fruit: fruitForLevel(clamped),
   };
 }
